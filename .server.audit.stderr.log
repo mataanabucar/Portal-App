@@ -1,0 +1,16 @@
+=3210 : The term '=3210' is not recognized as the name of a cmdlet, function, script file, or operable program. Check 
+the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:79
++ ... 00000347\OneDrive - Gensuite LLC\Desktop\Portal App'; ='3210'; ='mock ...
++                                                           ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (=3210:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+=mock : The term '=mock' is not recognized as the name of a cmdlet, function, script file, or operable program. Check 
+the spelling of the name, or if a path was included, verify that the path is correct and try again.
+At line:1 char:88
++ ... OneDrive - Gensuite LLC\Desktop\Portal App'; ='3210'; ='mock'; node ' ...
++                                                           ~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (=mock:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 

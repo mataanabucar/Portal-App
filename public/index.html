@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal Visualizer</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%2322d3ee'/%3E%3Cstop offset='100%25' stop-color='%238b5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='18' fill='%2307101f'/%3E%3Cpath d='M18 20h28v8H18zm0 16h18v8H18zm22 0h6v8h-6z' fill='url(%23g)'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="shell app-shell" aria-label="Portal Visualizer dashboard">
+      <section class="hero hero-card" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <h1 id="page-title">Today's queue</h1>
+          <p class="lede" id="hero-lede" aria-live="polite">
+            Loading your current requests and surfacing what needs action today.
+          </p>
+        </div>
+
+        <div class="hero-actions">
+          <button id="refresh-dashboard" type="button" aria-label="Refresh queue">
+            Refresh queue
+          </button>
+          <div class="status-pill" id="status-pill" role="status" aria-live="polite">
+            Loading
+          </div>
+          <p class="status-age" id="data-age" aria-live="polite">
+            Looking for a saved snapshot...
+          </p>
+        </div>
+      </section>
+
+      <section class="board-shell" aria-labelledby="queue-heading">
+        <div class="board-header">
+          <div>
+            <p class="section-kicker">Queue</p>
+            <h2 id="queue-heading">What needs action</h2>
+          </div>
+          <p class="board-meta" id="board-meta">Waiting for data...</p>
+        </div>
+
+        <div class="todo-board" id="todo-board" aria-live="polite">
+          <article class="todo-empty">
+            <h3>Loading items...</h3>
+            <p>The dashboard will populate automatically when the portal request finishes.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="focus-grid" aria-label="Priority and summary">
+        <article
+          class="priority-card dashboard-sheen-card"
+          id="priority-spotlight"
+          aria-live="polite"
+          aria-label="Top priority"
+        >
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <p class="section-kicker">Do This First</p>
+          <h2>Loading top priority...</h2>
+          <p class="priority-next">
+            The highest-priority portal item will appear here as soon as the dashboard refresh completes.
+          </p>
+        </article>
+
+        <article class="summary-card dashboard-sheen-card" aria-labelledby="summary-heading">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Quick Read</p>
+              <h2 id="summary-heading">What matters right now</h2>
+            </div>
+          </div>
+          <div id="summary-output" aria-live="polite">Loading summary...</div>
+        </article>
+      </section>
+
+      <section class="telemetry-grid" aria-label="Queue telemetry">
+        <article class="stat-card stat-card-total dashboard-sheen-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <p class="stat-label">Open items</p>
+          <p class="stat-value" id="stat-total">0</p>
+          <p class="stat-note">Everything currently in your working queue.</p>
+        </article>
+
+        <article class="stat-card stat-card-urgent dashboard-sheen-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <p class="stat-label">Do now</p>
+          <p class="stat-value" id="stat-urgent">0</p>
+          <p class="stat-note">Critical or high-priority requests to act on first.</p>
+        </article>
+
+        <article class="stat-card stat-card-blocked dashboard-sheen-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <p class="stat-label">Blocked</p>
+          <p class="stat-value" id="stat-blocked">0</p>
+          <p class="stat-note">Requests with blockers or missing information.</p>
+        </article>
+      </section>
+      <span id="stat-mode" class="visually-hidden" aria-hidden="true">-</span>
+
+      <details class="panel-shell advanced-panel">
+        <summary>
+          <span class="details-title">Advanced controls</span>
+          <span class="details-note">Adjust prompts and parser behavior when you need it.</span>
+        </summary>
+
+        <div class="advanced-grid">
+          <section class="controls advanced-controls" aria-label="Advanced controls">
+            <label class="checkbox-row">
+              <input id="include-summary" type="checkbox" checked />
+              <span>Generate a readable brief</span>
+            </label>
+            <p class="field-note">
+              Uses the current queue snapshot to write a quick brief. Best when you want
+              a fast read on what needs attention today.
+            </p>
+
+            <label class="checkbox-row">
+              <input id="parser-testchat" type="checkbox" />
+              <span>Raw response mode: return plain text instead of structured fields</span>
+            </label>
+            <p class="field-note">
+              Leave this off for app-friendly structured output. Turn it on only when you
+              want to inspect the raw read of the portal data.
+            </p>
+
+            <label class="stacked-field" for="focus-text">
+              <span>Summary prompt</span>
+              <textarea
+                id="focus-text"
+                rows="3"
+                placeholder="Example: highlight overdue items, risky owners, and anything that needs action this week."
+              >Tell me what I need to do today, what is being asked of me, what deliverables are implied, and which requests are most urgent.</textarea>
+            </label>
+
+            <label class="stacked-field" for="parser-focus-text">
+              <span>Parser extraction goal</span>
+              <textarea
+                id="parser-focus-text"
+                rows="3"
+                placeholder="Example: extract the concrete asks, next actions, and urgency for each request."
+              >Extract each request into structured fields with requester, application, urgency, summary, next action, blockers, and due date.</textarea>
+            </label>
+          </section>
+        </div>
+      </details>
+
+      <details class="panel-shell diagnostics-panel">
+        <summary>
+          <span class="details-title">Diagnostics</span>
+          <span class="details-note">Health, parser output, raw snapshot, and live status.</span>
+        </summary>
+
+        <div class="debug-grid" aria-label="Diagnostics">
+          <article class="debug-card">
+            <div class="debug-head">
+              <p class="section-kicker">System</p>
+              <h3>Health</h3>
+            </div>
+            <pre id="health-output">Loading...</pre>
+          </article>
+
+          <article class="debug-card">
+            <div class="debug-head">
+              <p class="section-kicker">AI</p>
+              <h3>Parser</h3>
+            </div>
+            <pre id="parser-output">No parser response yet.</pre>
+          </article>
+
+          <article class="debug-card debug-card-wide">
+            <div class="debug-head">
+              <p class="section-kicker">Portal</p>
+              <h3>Snapshot</h3>
+            </div>
+            <pre id="snapshot-output">No portal data loaded yet.</pre>
+          </article>
+
+          <article class="debug-card debug-card-wide">
+            <div class="debug-head">
+              <p class="section-kicker">Runtime</p>
+              <h3>Status</h3>
+            </div>
+            <pre id="status-output">Ready.</pre>
+          </article>
+        </div>
+      </details>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+import { buildPortalParserInput } from "./portalParserInput.js";
+
+export function createDisabledPortalParser(config) {
+  const reason = config.openAiApiKey
+    ? "Enable OPENAI_ENABLED=true to use the portal parser."
+    : "Set OPENAI_API_KEY and OPENAI_ENABLED=true to use the portal parser.";
+
+  return {
+    describe() {
+      return {
+        enabled: false,
+        model: config.openAiModel,
+        reason,
+        testchatAllowed: config.openAiAllowTestchat
+      };
+    },
+
+    async parseSnapshot(snapshot, options = {}) {
+      const originalText = buildPortalParserInput(snapshot);
+      const testchat = isTestchatEnabled(config, options.testchat);
+
+      return testchat
+        ? {
+            enabled: false,
+            model: config.openAiModel,
+            mode: "testchat",
+            testchat: true,
+            reason,
+            originalText,
+            responseText:
+              "Portal parser is disabled. Enable OPENAI_ENABLED=true and set OPENAI_API_KEY to inspect raw test chat output.",
+            debug: buildDebugObject(config, "testchat")
+          }
+        : {
+            enabled: false,
+            model: config.openAiModel,
+            mode: "structured",
+            testchat: false,
+            reason,
+            originalText,
+            parsed: {
+              overview:
+                "Portal parser is disabled. Enable OPENAI_ENABLED=true and set OPENAI_API_KEY to receive structured portal parsing.",
+              items: []
+            },
+            debug: buildDebugObject(config, "structured")
+          };
+    }
+  };
+}
+
+function buildDebugObject(config, mode) {
+  return {
+    endpoint: "/api/portal/parse",
+    mode,
+    model: config.openAiModel,
+    responseVersion: "2026-05-portal-parse-v1"
+  };
+}
+
+function isTestchatEnabled(config, requestedTestchat) {
+  return config.openAiAllowTestchat && requestedTestchat === true;
+}

@@ -1,0 +1,13 @@
+node_modules/
+.env
+.history/
+.cursor/
+.vscode/
+.claude/
+sftp.json
+sftp-config.json
+.local-browser/
+.local-auth/
+coverage/
+npm-debug.log*
+dist/

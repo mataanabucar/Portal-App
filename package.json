@@ -1,0 +1,56 @@
+{
+  "name": "portal-visualizer-local",
+  "version": "0.1.0",
+  "description": "Local desktop shell and portal dashboard for Benchmark portal work queue review.",
+  "author": "Benchmark Gensuite",
+  "private": true,
+  "type": "module",
+  "main": "src/desktop/main.js",
+  "scripts": {
+    "dev": "node scripts/launch-browser-dev.js",
+    "dev:desktop": "node scripts/launch-desktop-shell.js --rebuild",
+    "start": "node scripts/launch-desktop-shell.js",
+    "desktop": "node scripts/launch-desktop-shell.js",
+    "server": "node src/server/index.js",
+    "server:dev": "node --watch src/server/index.js",
+    "pack:win": "electron-builder --win dir",
+    "dist:win": "electron-builder --win nsis portable",
+    "open:portal-profile": "node scripts/open-portal-profile.js",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "openai": "^6.39.0",
+    "playwright-core": "^1.54.2"
+  },
+  "devDependencies": {
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.benchmarkdigital.portalvisualizer",
+    "productName": "Portal Visualizer",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "public/**/*",
+      "src/**/*",
+      "scripts/**/*",
+      "package.json",
+      ".env.example",
+      "README.md",
+      "!notes/**/*",
+      "!.local-browser/**/*"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  }
+}

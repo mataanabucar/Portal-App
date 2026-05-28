@@ -1,0 +1,57 @@
+- main "Portal Visualizer dashboard" [ref=e2]:
+  - region "Today's Work Queue" [ref=e3]:
+    - generic [ref=e4]:
+      - paragraph [ref=e5]: Work Queue
+      - heading "Today's Work Queue" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Open the last saved queue here. Use Refresh queue when you want a new portal pull.
+      - generic "Dashboard context" [ref=e8]:
+        - generic [ref=e9]: Mission control
+        - generic [ref=e10]: Portal-driven focus
+    - generic [ref=e11]:
+      - button "Refresh queue" [ref=e12] [cursor=pointer]
+      - status [ref=e13]: No data
+      - paragraph [ref=e14]: No saved snapshot yet. Refresh the queue to fetch and store one.
+  - region "Priority and summary" [ref=e15]:
+    - article "Top priority" [ref=e16]:
+      - paragraph [ref=e17]: Do This First
+      - heading "No saved queue yet" [level=2] [ref=e18]
+      - paragraph [ref=e19]: Click Refresh queue to pull the portal, save the latest dashboard JSON locally, and pin it here for the next time you open the app.
+      - paragraph [ref=e20]: Until you refresh, the app will stay on your last saved snapshot instead of requesting new portal data automatically.
+    - article "What matters right now" [ref=e21]:
+      - generic [ref=e23]:
+        - paragraph [ref=e24]: Action Brief
+        - heading "What matters right now" [level=2] [ref=e25]
+      - paragraph [ref=e27]: No saved summary yet. Refresh the queue to fetch and store one.
+  - region "Queue telemetry" [ref=e28]:
+    - article [ref=e29]:
+      - paragraph [ref=e30]: Open items
+      - paragraph [ref=e31]: "0"
+      - paragraph [ref=e32]: Everything currently in your working queue.
+    - article [ref=e33]:
+      - paragraph [ref=e34]: Do now
+      - paragraph [ref=e35]: "0"
+      - paragraph [ref=e36]: Critical or high-priority requests to act on first.
+    - article [ref=e37]:
+      - paragraph [ref=e38]: Blocked
+      - paragraph [ref=e39]: "0"
+      - paragraph [ref=e40]: Requests with blockers or missing information.
+  - generic [ref=e41]: "-"
+  - region "Distinct to-dos from your portal items" [ref=e42]:
+    - generic [ref=e43]:
+      - generic [ref=e44]:
+        - paragraph [ref=e45]: Work Queue
+        - heading "Distinct to-dos from your portal items" [level=2] [ref=e46]
+      - paragraph [ref=e47]: No saved snapshot yet.
+    - article [ref=e49]:
+      - heading "No saved queue yet" [level=3] [ref=e50]
+      - paragraph [ref=e51]: Refresh the queue once to fetch the portal snapshot, store it locally in this browser, and render it here on future page loads.
+  - group [ref=e52]:
+    - generic "Advanced controls Adjust prompts and parser behavior when you need it. +" [ref=e53] [cursor=pointer]:
+      - generic [ref=e54]: Advanced controls
+      - generic [ref=e55]: Adjust prompts and parser behavior when you need it.
+      - text: +
+  - group [ref=e56]:
+    - generic "Diagnostics Health, parser output, raw snapshot, and live status. +" [ref=e57] [cursor=pointer]:
+      - generic [ref=e58]: Diagnostics
+      - generic [ref=e59]: Health, parser output, raw snapshot, and live status.
+      - text: +
