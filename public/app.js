@@ -483,8 +483,157 @@ function inferUrgencyFromSnapshot(record) {
 }
 
 function compareTodoItems(left, right) {
+  const leftDueDate = parseDueDateValue(left.dueDate);
+  const rightDueDate = parseDueDateValue(right.dueDate);
+
+  if (leftDueDate !== null && rightDueDate !== null && leftDueDate !== rightDueDate) {
+    return leftDueDate - rightDueDate;
+  }
+
+  if (leftDueDate !== null && rightDueDate === null) {
+    return -1;
+  }
+
+  if (leftDueDate === null && rightDueDate !== null) {
+    return 1;
+  }
+
+  const taskIdComparison = compareTaskIds(left.id, right.id);
+
+  if (taskIdComparison !== 0) {
+    return taskIdComparison;
+  }
+
+  const urgencyComparison = compareUrgency(left.urgency, right.urgency);
+
+  if (urgencyComparison !== 0) {
+    return urgencyComparison;
+  }
+
+  return (left.title || "").localeCompare(right.title || "", undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
+function compareUrgency(leftUrgency, rightUrgency) {
   const urgencyOrder = { critical: 0, high: 1, normal: 2, low: 3 };
-  return (urgencyOrder[left.urgency] ?? 9) - (urgencyOrder[right.urgency] ?? 9);
+  return (urgencyOrder[leftUrgency] ?? 9) - (urgencyOrder[rightUrgency] ?? 9);
+}
+
+function compareTaskIds(leftId, rightId) {
+  const leftNumericId = parseTaskIdNumber(leftId);
+  const rightNumericId = parseTaskIdNumber(rightId);
+
+  if (leftNumericId !== null && rightNumericId !== null && leftNumericId !== rightNumericId) {
+    return leftNumericId - rightNumericId;
+  }
+
+  if (leftNumericId !== null && rightNumericId === null) {
+    return -1;
+  }
+
+  if (leftNumericId === null && rightNumericId !== null) {
+    return 1;
+  }
+
+  const normalizedLeftId = normalizeText(leftId);
+  const normalizedRightId = normalizeText(rightId);
+
+  if (!normalizedLeftId && !normalizedRightId) {
+    return 0;
+  }
+
+  if (!normalizedLeftId) {
+    return 1;
+  }
+
+  if (!normalizedRightId) {
+    return -1;
+  }
+
+  return normalizedLeftId.localeCompare(normalizedRightId, undefined, {
+    numeric: true,
+    sensitivity: "base"
+  });
+}
+
+function parseTaskIdNumber(value) {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const digitsMatch = normalizedValue.match(/\d+/g);
+
+  if (!digitsMatch) {
+    return null;
+  }
+
+  const parsedValue = Number.parseInt(digitsMatch.join(""), 10);
+  return Number.isFinite(parsedValue) ? parsedValue : null;
+}
+
+function parseDueDateValue(value) {
+  const normalizedValue = normalizeText(value)
+    .replace(/^due:\s*/i, "")
+    .replace(/^[A-Za-z]{3},\s*/, "");
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const isoMatch = normalizedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return Date.UTC(Number(year), Number(month) - 1, Number(day));
+  }
+
+  const slashMatch = normalizedValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+
+  if (slashMatch) {
+    const [, month, day, year] = slashMatch;
+    return Date.UTC(normalizeShortYear(Number(year)), Number(month) - 1, Number(day));
+  }
+
+  const monthMatch = normalizedValue.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/);
+
+  if (monthMatch) {
+    const [, day, monthLabel, year] = monthMatch;
+    const monthIndex = getMonthIndex(monthLabel);
+
+    if (monthIndex !== null) {
+      return Date.UTC(normalizeShortYear(Number(year)), monthIndex, Number(day));
+    }
+  }
+
+  const fallbackValue = Date.parse(normalizedValue);
+  return Number.isNaN(fallbackValue) ? null : fallbackValue;
+}
+
+function normalizeShortYear(value) {
+  return value < 100 ? 2000 + value : value;
+}
+
+function getMonthIndex(label) {
+  const monthIndexes = {
+    jan: 0,
+    feb: 1,
+    mar: 2,
+    apr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    aug: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dec: 11
+  };
+
+  return monthIndexes[label.toLowerCase()] ?? null;
 }
 
 function extractRequester(detail) {

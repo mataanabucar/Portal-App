@@ -1,0 +1,147 @@
+- main "Portal Visualizer dashboard" [ref=e2]:
+  - region "Today's queue" [ref=e3]:
+    - generic [ref=e4]:
+      - heading "Today's queue" [level=1] [ref=e5]
+      - paragraph [ref=e6]: 3 open requests total. First due 29-May-26.
+    - generic [ref=e7]:
+      - button "Refresh queue" [ref=e8] [cursor=pointer]
+      - status [ref=e9]: Old
+      - paragraph [ref=e10]: "Refresh failed. Still showing the saved snapshot from 52h 52m old. Could not reach /api/dashboard. Current page origin: http://127.0.0.1:3000. Open the app from the local server URL (usually http://127.0.0.1:3000) and keep the dev server running."
+  - region "What needs action" [ref=e11]:
+    - generic [ref=e12]:
+      - generic [ref=e13]:
+        - paragraph [ref=e14]: Queue
+        - heading "What needs action" [level=2] [ref=e15]
+      - paragraph [ref=e16]: 3 items | age 52h 52m old | updated 1:48 PM
+    - generic [ref=e17]:
+      - article [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]: Up next
+          - generic [ref=e21]:
+            - generic [ref=e22]: High
+            - generic [ref=e23]: "1"
+        - heading "Batch upload error processing row in Compliance Calendar" [level=3] [ref=e24]
+        - paragraph [ref=e25]: Next action
+        - paragraph [ref=e26]: Review the screenshot and identify the failing row or template field causing the upload error.
+        - paragraph [ref=e27]: User can download, fill, and submit the batch upload template, but Gensuite returns an error saying there was a problem while processing a row.
+        - generic [ref=e28]:
+          - generic [ref=e29]: "Requester: Drew McQuillin"
+          - generic [ref=e30]: "App: Compliance Calendar"
+          - generic [ref=e31]: "Due: 29-May-26"
+        - generic [ref=e32]:
+          - paragraph [ref=e33]: Blocked or needs input
+          - list [ref=e34]:
+            - listitem [ref=e35]: Screenshot referenced but not provided
+            - listitem [ref=e36]: Specific row error details are missing
+        - generic [ref=e37]:
+          - paragraph [ref=e38]: Confidence 96%
+          - paragraph [ref=e39]: Due 29-May-26
+      - article [ref=e40]:
+        - generic [ref=e41]:
+          - generic [ref=e42]: In queue
+          - generic [ref=e43]:
+            - generic [ref=e44]: Normal
+            - generic [ref=e45]: "2"
+        - heading "Audit Assistant enhancement request for field labels and export behavior" [level=3] [ref=e46]
+        - paragraph [ref=e47]: Next action
+        - paragraph [ref=e48]: Confirm feasibility and estimate effort for the requested Audit Assistant changes.
+        - paragraph [ref=e49]: "Requested UI and export changes in Audit Assistant: rename the Finding Citation(s) heading, make Finding Citation free text for note types, keep note dropdown nonexportable to ATS and off audit..."
+        - generic [ref=e50]:
+          - generic [ref=e51]: "Requester: John"
+          - generic [ref=e52]: "App: Audit Assistant"
+          - generic [ref=e53]: "Due: 20-Jun-26"
+        - generic [ref=e54]:
+          - paragraph [ref=e55]: Blocked or needs input
+          - list [ref=e56]:
+            - listitem [ref=e57]: No technical assessment or implementation approach provided
+        - group [ref=e58]:
+          - generic "More context +" [ref=e59] [cursor=pointer]
+        - generic [ref=e60]:
+          - paragraph [ref=e61]: Confidence 95%
+          - paragraph [ref=e62]: Due 20-Jun-26
+      - article [ref=e63]:
+        - generic [ref=e64]:
+          - generic [ref=e65]: In queue
+          - generic [ref=e66]:
+            - generic [ref=e67]: Do now
+            - generic [ref=e68]: "3"
+        - heading "Urgent ATS classification fix for un-deletable classification" [level=3] [ref=e69]
+        - paragraph [ref=e70]: Next action
+        - paragraph [ref=e71]: Approve or remove the PSM HIGH classification and verify whether the custom selection behavior was impacted.
+        - paragraph [ref=e72]: A test classification was added in ATS and cannot be deleted, and the user believes it may have disabled the Custom Selection >180 days; request asks to remove PSM HIGH immediately and notes the...
+        - generic [ref=e73]:
+          - generic [ref=e74]: "Requester: Colin"
+          - generic [ref=e75]: "App: Action Tracking System"
+          - generic [ref=e76]: "Due: 25-Jun-26"
+        - generic [ref=e77]:
+          - paragraph [ref=e78]: Blocked or needs input
+          - list [ref=e79]:
+            - listitem [ref=e80]: Approval requested before removal
+            - listitem [ref=e81]: Exact classification record to delete is only referenced in history
+        - group [ref=e82]:
+          - generic "More context +" [ref=e83] [cursor=pointer]
+        - generic [ref=e84]:
+          - paragraph [ref=e85]: Confidence 97%
+          - paragraph [ref=e86]: Due 25-Jun-26
+  - region "Priority and summary" [ref=e87]:
+    - article "Top priority" [ref=e88]:
+      - generic [ref=e89]:
+        - generic [ref=e90]:
+          - paragraph [ref=e91]: Do This First
+          - heading "Batch upload error processing row in Compliance Calendar" [level=2] [ref=e92]
+        - generic [ref=e93]:
+          - generic [ref=e94]: High
+          - generic [ref=e95]: "1"
+      - paragraph [ref=e96]: Start with
+      - paragraph [ref=e97]: Review the screenshot and identify the failing row or template field causing the upload error.
+      - paragraph [ref=e98]: It rises first because it is blocked and needs follow-up before the rest of the queue can move.
+      - generic [ref=e99]:
+        - generic [ref=e100]: "Requester: Drew McQuillin"
+        - generic [ref=e101]: "App: Compliance Calendar"
+        - generic [ref=e102]: "Due: 29-May-26"
+      - paragraph [ref=e103]: Screenshot referenced but not provided
+    - article "What matters right now" [ref=e104]:
+      - generic [ref=e106]:
+        - paragraph [ref=e107]: Quick Read
+        - heading "What matters right now" [level=2] [ref=e108]
+      - generic [ref=e109]:
+        - region "Current focus" [ref=e110]:
+          - paragraph [ref=e111]: Focus
+          - paragraph [ref=e112]: Tell me what I need to do today, what is being asked of me, what deliverables are implied, and which requests are most urgent.
+        - list [ref=e114]:
+          - listitem [ref=e115]: You have 3 open requests; 2 are urgent/high risk and 1 is a standard enhancement.
+          - listitem [ref=e116]: "Today’s priority: act on the Chemtrade ATS issue first — marked “URGENT FIX” and “Priority Request.”"
+          - listitem [ref=e117]: "Chemtrade ATS (Due 25-Jun-26): implied deliverables are to remove the test “PSM HIGH” classification, assess/approve the risk assessment, and clarify how classifications should be used so users don’t get locked into undeletable options."
+          - listitem [ref=e118]: "Owner needed: Abucar/Mataan approval is requested in the history; Pilar Cobian is coordinating the fix."
+          - listitem [ref=e119]: "Novolex Audit Assistant (Due 20-Jun-26): deliverable is a feasibility/tech assessment for UI/behavior changes:"
+          - listitem [ref=e120]: rename “Finding Citation(s)” to “Finding / Citation(s)”
+          - listitem [ref=e121]: make “Finding Citation” free text when Type = note
+          - listitem [ref=e122]: keep note dropdown non-exportable to ATS and off the audit report
+          - listitem [ref=e123]: hide “Update All” in the type column
+          - listitem [ref=e124]: "Risk on Novolex: churn risk is explicitly called out; customer has paid $57,006 and is underused."
+          - listitem [ref=e125]: "Savannah River Compliance Calendar (Due 29-May-26): user is blocked by a batch upload error (“problem while processing row…”); deliverable is troubleshooting/fix for template upload processing."
+          - listitem [ref=e126]: "Most urgent order: 1) Chemtrade urgent fix/approval, 2) Savannah River blocker, 3) Novolex feasibility assessment."
+  - region "Queue telemetry" [ref=e127]:
+    - article [ref=e128]:
+      - paragraph [ref=e129]: Open items
+      - paragraph [ref=e130]: "3"
+      - paragraph [ref=e131]: Everything currently in your working queue.
+    - article [ref=e132]:
+      - paragraph [ref=e133]: Do now
+      - paragraph [ref=e134]: "2"
+      - paragraph [ref=e135]: Critical or high-priority requests to act on first.
+    - article [ref=e136]:
+      - paragraph [ref=e137]: Blocked
+      - paragraph [ref=e138]: "3"
+      - paragraph [ref=e139]: Requests with blockers or missing information.
+  - generic [ref=e140]: Structured
+  - group [ref=e141]:
+    - generic "Advanced controls Adjust prompts and parser behavior when you need it. +" [ref=e142] [cursor=pointer]:
+      - generic [ref=e143]: Advanced controls
+      - generic [ref=e144]: Adjust prompts and parser behavior when you need it.
+      - text: +
+  - group [ref=e145]:
+    - generic "Diagnostics Health, parser output, raw snapshot, and live status. +" [ref=e146] [cursor=pointer]:
+      - generic [ref=e147]: Diagnostics
+      - generic [ref=e148]: Health, parser output, raw snapshot, and live status.
+      - text: +
