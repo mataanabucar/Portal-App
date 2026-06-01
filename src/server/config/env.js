@@ -60,7 +60,14 @@ export function buildConfig(overrides = {}) {
     openAiEnabled: process.env.OPENAI_ENABLED === "true",
     openAiApiKey: process.env.OPENAI_API_KEY || "",
     openAiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
-    openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false"
+    openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
+
+    // Microsoft Graph / Azure AD
+    graphTenantId:     process.env.GRAPH_TENANT_ID     || "",
+    graphClientId:     process.env.GRAPH_CLIENT_ID     || "",
+    graphClientSecret: process.env.GRAPH_CLIENT_SECRET || "",
+    graphRedirectUri:  process.env.GRAPH_REDIRECT_URI  || "http://localhost:3069/auth/redirect",
+    graphScopes:       (process.env.GRAPH_SCOPES || "User.Read Mail.Read Calendars.Read offline_access").split(" ").filter(Boolean)
   };
 
   return { ...baseConfig, ...overrides };
