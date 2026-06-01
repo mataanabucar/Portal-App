@@ -8,6 +8,14 @@ sftp.json
 sftp-config.json
 .local-browser/
 .local-auth/
+.playwright-mcp/
+.impeccable/critique/
+.server*.log
+desktop.ini
+portal-urgency-badges.png
+handout.md
+notes/apiEndpoints.txt
+notes/powershellTextWorking.txt
 coverage/
 npm-debug.log*
 dist/
