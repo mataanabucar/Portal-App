@@ -112,6 +112,32 @@ function applyDefaults() {
   elements.parserFocus.value = defaultValues.parserFocus;
 }
 
+function applySavedControls(controls = {}) {
+  elements.includeSummary.checked =
+    typeof controls.includeSummary === "boolean"
+      ? controls.includeSummary
+      : defaultValues.includeSummary;
+  elements.parserTestchat.checked =
+    typeof controls.parserTestchat === "boolean"
+      ? controls.parserTestchat
+      : defaultValues.parserTestchat;
+  elements.focus.value =
+    typeof controls.focus === "string" ? controls.focus : defaultValues.focus;
+  elements.parserFocus.value =
+    typeof controls.parserFocus === "string"
+      ? controls.parserFocus
+      : defaultValues.parserFocus;
+}
+
+function readCurrentControls() {
+  return {
+    includeSummary: elements.includeSummary.checked,
+    parserTestchat: elements.parserTestchat.checked,
+    focus: elements.focus.value,
+    parserFocus: elements.parserFocus.value
+  };
+}
+
 function renderDashboard(payload, healthPayload, options = {}) {
   const summaryMarkup = renderSummary(payload.summary, elements.focus.value.trim());
   const todoItems = buildTodoItems(payload);
@@ -792,22 +818,31 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function saveDashboardCache(payload, healthPayload) {
+function isDashboardCacheRecord(value) {
+  return Boolean(value?.payload?.snapshot && value?.healthPayload);
+}
+
+function buildDashboardCacheRecord(payload, healthPayload) {
+  return {
+    cachedAt: new Date().toISOString(),
+    healthPayload,
+    payload,
+    controls: readCurrentControls()
+  };
+}
+
+function writeDashboardCacheToLocalStorage(cacheRecord) {
   try {
     localStorage.setItem(
       DASHBOARD_CACHE_KEY,
-      JSON.stringify({
-        cachedAt: new Date().toISOString(),
-        healthPayload,
-        payload
-      })
+      JSON.stringify(cacheRecord)
     );
   } catch (error) {
-    setStatus(`Dashboard loaded, but local save failed: ${error.message}`);
+    throw new Error(`browser cache save failed: ${error.message}`);
   }
 }
 
-function readDashboardCache() {
+function readDashboardCacheFromLocalStorage() {
   try {
     const rawValue = localStorage.getItem(DASHBOARD_CACHE_KEY);
 
@@ -817,7 +852,7 @@ function readDashboardCache() {
 
     const parsedValue = JSON.parse(rawValue);
 
-    if (!parsedValue?.payload?.snapshot || !parsedValue?.healthPayload) {
+    if (!isDashboardCacheRecord(parsedValue)) {
       return null;
     }
 
@@ -825,6 +860,56 @@ function readDashboardCache() {
   } catch (error) {
     return null;
   }
+}
+
+async function readDashboardCacheFromServer() {
+  try {
+    const cachedValue = await request("/api/dashboard/cache");
+    return isDashboardCacheRecord(cachedValue) ? cachedValue : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readDashboardCache() {
+  const serverCachedValue = await readDashboardCacheFromServer();
+
+  if (serverCachedValue) {
+    try {
+      writeDashboardCacheToLocalStorage(serverCachedValue);
+    } catch {
+      // Disk-backed cache is the primary restore path for the desktop shell.
+    }
+
+    return serverCachedValue;
+  }
+
+  return readDashboardCacheFromLocalStorage();
+}
+
+async function saveDashboardCache(payload, healthPayload) {
+  const cacheRecord = buildDashboardCacheRecord(payload, healthPayload);
+  const saveErrors = [];
+
+  try {
+    writeDashboardCacheToLocalStorage(cacheRecord);
+  } catch (error) {
+    saveErrors.push(error.message);
+  }
+
+  try {
+    await request("/api/dashboard/cache", {
+      method: "POST",
+      body: JSON.stringify(cacheRecord)
+    });
+  } catch (error) {
+    saveErrors.push(`desktop cache save failed: ${error.message}`);
+  }
+
+  return {
+    cacheRecord,
+    saveError: saveErrors.join(" ")
+  };
 }
 
 function clearDashboardUi() {
@@ -847,19 +932,19 @@ function clearDashboardUi() {
   elements.prioritySpotlight.innerHTML = `
     <p class="section-kicker">Do This First</p>
     <h2>No saved queue yet</h2>
-    <p class="priority-next">Click Refresh queue to pull the portal, save the latest dashboard JSON locally, and pin it here for the next time you open the app.</p>
+    <p class="priority-next">Click Refresh queue to pull the portal, save the latest dashboard JSON locally on this device, and pin it here for the next time you open the app.</p>
     <p class="priority-support">Until you refresh, the app will stay on your last saved snapshot instead of requesting new portal data automatically.</p>
   `;
   elements.todoBoard.innerHTML = `
     <article class="todo-empty">
       <h3>No saved queue yet</h3>
-      <p>Refresh the queue once to fetch the portal snapshot, store it locally in this browser, and render it here on future page loads.</p>
+      <p>Refresh the queue once to fetch the portal snapshot, store it locally on this device, and render it here on future page loads.</p>
     </article>
   `;
 }
 
-function renderCachedDashboardOnStartup() {
-  const cachedValue = readDashboardCache();
+async function renderCachedDashboardOnStartup() {
+  const cachedValue = await readDashboardCache();
 
   if (!cachedValue) {
     clearDashboardUi();
@@ -870,6 +955,7 @@ function renderCachedDashboardOnStartup() {
     return;
   }
 
+  applySavedControls(cachedValue.controls);
   renderDashboard(cachedValue.payload, cachedValue.healthPayload, {
     cachedAt: cachedValue.cachedAt
   });
@@ -1012,9 +1098,13 @@ async function loadDashboard() {
 
   const dashboardPayload = dashboardResult.value;
 
-  saveDashboardCache(dashboardPayload, healthPayload);
+  const { saveError } = await saveDashboardCache(dashboardPayload, healthPayload);
   renderDashboard(dashboardPayload, healthPayload);
-  setStatus("Dashboard refreshed and saved locally.");
+  setStatus(
+    saveError
+      ? `Dashboard refreshed, but cache persistence is degraded: ${saveError}`
+      : "Dashboard refreshed and saved for the next launch."
+  );
 }
 
 function renderDashboardError(message) {
@@ -1054,8 +1144,12 @@ elements.dashboardRefresh.addEventListener("click", () => {
   handleAction(loadDashboard);
 });
 
-applyDefaults();
-renderCachedDashboardOnStartup();
-setInterval(() => {
-  refreshFreshnessIndicators();
-}, FRESHNESS_TICK_MS);
+async function initializeApp() {
+  applyDefaults();
+  await renderCachedDashboardOnStartup();
+  setInterval(() => {
+    refreshFreshnessIndicators();
+  }, FRESHNESS_TICK_MS);
+}
+
+void initializeApp();

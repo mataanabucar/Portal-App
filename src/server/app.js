@@ -1,5 +1,9 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
+import {
+  readDashboardCache,
+  writeDashboardCache
+} from "./services/dashboardCache.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
 
@@ -21,6 +25,22 @@ export function createApp({ config, portalService, summarizer, parser }) {
       },
       now: new Date().toISOString()
     });
+  });
+
+  app.get("/api/dashboard/cache", (request, response) => {
+    response.json(readDashboardCache(config.dashboardCacheFile) || null);
+  });
+
+  app.post("/api/dashboard/cache", (request, response, next) => {
+    try {
+      const payload = writeDashboardCache(
+        config.dashboardCacheFile,
+        request.body
+      );
+      response.json(payload);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post("/api/portal/preview", async (request, response, next) => {

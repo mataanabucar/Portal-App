@@ -8,6 +8,7 @@ sftp.json
 sftp-config.json
 .local-browser/
 .local-auth/
+.local-state/
 .playwright-mcp/
 .impeccable/critique/
 .server*.log

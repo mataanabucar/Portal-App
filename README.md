@@ -69,6 +69,7 @@ What it does:
 - it then launches the unpacked native shell from `dist\win-unpacked\Portal Visualizer.exe`
 - the desktop app starts the existing local server inside the shell and loads it in the native window
 - writable runtime data stays under the Electron user-data folder
+- the last successful dashboard refresh is persisted under `.local-state/dashboard-cache.json` in that runtime area, so reopening the shell restores the same queue until you click `Refresh queue`
 
 Double-click:
 
@@ -146,6 +147,12 @@ That keeps secrets and portal configuration outside the packaged app bundle whil
 
 Set `PORTAL_SOURCE_MODE=mock` to validate the app without any real portal dependency.
 
+Optional local dashboard persistence path:
+
+```env
+DASHBOARD_CACHE_FILE=.local-state/dashboard-cache.json
+```
+
 ### JSON endpoint mode
 
 Use this when the portal already exposes a JSON endpoint:
@@ -191,10 +198,11 @@ PORTAL_DETAIL_CONTENT_SELECTOR=body
 This mode matches the live portal structure discovered in Chrome DevTools on May 22, 2026:
 
 - the main page is `index_old.cfm`
+- that landing page may first return an auto-submitting redirect form through `login/internaloredirect.cfm`
 - the active Customer Requests list is inside an iframe whose `src` contains `todolist`
 - each request row includes links such as `?editid=` and `?itemhm=`
 
-The extractor first fetches the outer page, then the request-list iframe, then optionally follows the request links for deeper text.
+The extractor first fetches the outer page, follows that auto-submit redirect form when present, then fetches the request-list iframe, and optionally follows the request links for deeper text.
 
 ### Background cookie-backed mode
 
@@ -350,6 +358,101 @@ Example response shape:
 
 The browser prototype exposes this through the `Run portal parser` button and the `Use parser test chat mode` checkbox.
 
+## Standalone Graph Tester
+
+The repo now also includes a separate browser-launched Microsoft Graph tester.
+
+This is intentionally isolated from the main portal server, Electron shell, and `public/` dashboard UI. It reuses only the Graph service layer under `src/server/services/graph/`.
+
+### What it is for
+
+- manual testing of the current Graph service functions
+- inspecting Graph responses in a readable UI
+- trying OData filters and query options without exposing secrets to the browser
+- resolving people, chats, and mailbox items by human-friendly names such as person names, chat topics, participant names, and message subjects
+- safely gating mutations behind an explicit confirmation checkbox
+
+### Required environment values
+
+Set the normal Graph app registration values:
+
+```env
+GRAPH_TENANT_ID=
+GRAPH_CLIENT_ID=
+GRAPH_CLIENT_SECRET=
+GRAPH_SCOPES=User.Read Mail.Read Calendars.Read Chat.Read People.Read MailboxSettings.ReadWrite offline_access
+```
+
+Use `GRAPH_CLIENT_SECRET` as a Windows user environment variable so every launcher and script can reuse the same secret:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GRAPH_CLIENT_SECRET", "<secret>", "User")
+$env:GRAPH_CLIENT_SECRET
+```
+
+Leave `GRAPH_CLIENT_SECRET=` blank in `.env` when you use the global variable.
+
+Keep `GRAPH_REDIRECT_URI` for the existing CLI script flow in `scripts/test-graph-api.js`.
+
+The standalone tester uses separate host and port settings plus a persisted token cache:
+
+```env
+GRAPH_TESTER_HOST=127.0.0.1
+GRAPH_TESTER_PORT=3069
+GRAPH_TESTER_REDIRECT_URI=
+GRAPH_TESTER_TOKEN_CACHE_FILE=.local-auth/graph-tester-token.json
+GRAPH_TESTER_AUTO_LOGIN_ON_STARTUP=true
+```
+
+- if `GRAPH_TESTER_REDIRECT_URI` is blank, the tester uses `http://localhost:3069/auth/redirect` based on its own port
+- the standalone tester no longer falls back to `GRAPH_REDIRECT_URI`; that redirect can belong to a different script or app
+- `GRAPH_TESTER_TOKEN_CACHE_FILE` stores the server-side token set locally so the tester can survive restarts
+- `GRAPH_TESTER_AUTO_LOGIN_ON_STARTUP=true` makes the tester automatically open Microsoft login at startup when no valid cached token is available
+- `scripts/manual-graph-oauth.ps1` now reads `GRAPH_CLIENT_SECRET` from the saved Windows environment variable and fails fast if that variable is missing
+
+### Azure redirect registration
+
+Register the redirect URI that the tester will actually use in the Azure app registration.
+
+Examples:
+
+```text
+http://localhost:3069/auth/redirect
+http://127.0.0.1:3069/auth/redirect
+```
+
+### Start the tester
+
+Normal launch:
+
+```powershell
+npm run graph-tester
+```
+
+Watch mode:
+
+```powershell
+npm run graph-tester:dev
+```
+
+Then open:
+
+```text
+http://127.0.0.1:3069
+```
+
+### Auth and security notes
+
+- on startup, the tester loads the cached token set from `GRAPH_TESTER_TOKEN_CACHE_FILE`
+- if the access token is expired and a refresh token is present, the tester silently refreshes and rewrites the cache file
+- if no valid token can be reused, the tester automatically opens the Microsoft login flow at startup when `GRAPH_TESTER_AUTO_LOGIN_ON_STARTUP=true`
+- the login button can be used later to force a fresh interactive OAuth flow
+- tokens, refresh tokens, id tokens, and `GRAPH_CLIENT_SECRET` stay server-side only
+- the persisted token cache file is local-only and already covered by `.gitignore` through `.local-auth/`
+- the UI only receives safe token metadata such as auth state, scope list, and expiry
+- mutating functions require the confirmation checkbox before the request can run
+- `Mail.Send` is still not implemented or exposed through the tester
+
 ## Development and debugging
 
 Normal use should stay in Electron.
@@ -383,6 +486,8 @@ npm run start
 npm run desktop
 npm run server
 npm run server:dev
+npm run graph-tester
+npm run graph-tester:dev
 npm run pack:win
 npm run dist:win
 npm run smoke

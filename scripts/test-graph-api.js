@@ -10,8 +10,9 @@
  *   mailbox | calendar | calendar-view | calendar-today |
  *   chats | chat-messages | people | token
  *
- * Set in .env or as env vars before running:
- *   GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET, GRAPH_REDIRECT_URI
+ * Set before running:
+ *   GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_REDIRECT_URI
+ *   GRAPH_CLIENT_SECRET (prefer a Windows user environment variable)
  */
 
 import "dotenv/config";
@@ -41,10 +42,10 @@ const authCfg = {
 
 if (!authCfg.tenantId || !authCfg.clientId || !authCfg.clientSecret) {
   console.error(
-    "\nERROR: Missing Graph credentials. Set in .env:\n" +
+    "\nERROR: Missing Graph credentials. Set these values before running:\n" +
     "  GRAPH_TENANT_ID\n" +
     "  GRAPH_CLIENT_ID\n" +
-    "  GRAPH_CLIENT_SECRET\n"
+    "  GRAPH_CLIENT_SECRET (prefer a Windows user environment variable)\n"
   );
   process.exit(1);
 }

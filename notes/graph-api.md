@@ -28,7 +28,7 @@ src/server/services/graph/
 
 ## Setup — Environment Variables
 
-Add to your `.env` (see `.env.example`):
+Add the non-secret values to your `.env` (see `.env.example`):
 
 ```env
 GRAPH_TENANT_ID=162035a0-31d1-4b3c-a276-491c1dbea2f1
@@ -40,13 +40,19 @@ GRAPH_SCOPES=User.Read Mail.Read Calendars.Read Chat.Read People.Read MailboxSet
 
 `GRAPH_CLIENT_SECRET` is read by `buildConfig()` in `src/server/config/env.js` as `config.graphClientSecret`.
 
+Prefer storing `GRAPH_CLIENT_SECRET` once as a Windows user environment variable instead of writing it into `.env`:
+
+```powershell
+[Environment]::SetEnvironmentVariable("GRAPH_CLIENT_SECRET", "your-secret", "User")
+```
+
 ---
 
 ## Running the Test Script
 
 ```powershell
-# Set secret for this session (or put it in .env)
-$env:GRAPH_CLIENT_SECRET = "your-secret"
+# Save the secret once as a user environment variable, then reopen PowerShell
+[Environment]::SetEnvironmentVariable("GRAPH_CLIENT_SECRET", "your-secret", "User")
 
 # All tests — opens browser once, runs everything
 node scripts/test-graph-api.js

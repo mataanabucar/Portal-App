@@ -16,6 +16,8 @@ export function buildConfig(overrides = {}) {
       "PORTAL_HEADERS_JSON",
       {}
     ),
+    dashboardCacheFile:
+      process.env.DASHBOARD_CACHE_FILE || ".local-state/dashboard-cache.json",
     portalCookie: process.env.PORTAL_COOKIE || "",
     portalCookieCacheFile:
       process.env.PORTAL_COOKIE_CACHE_FILE || ".local-auth/portal-cookie-cache.json",

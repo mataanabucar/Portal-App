@@ -19,9 +19,12 @@ const ALLOWED_OPENAI_RECORD_KEYS = [
 
 async function run() {
   await runMockScenario();
+  await runDashboardCachePersistenceScenario();
   await runLinkedHtmlScenario();
   await runIframeHtmlScenario();
+  await runAutoRedirectFormScenario();
   await runCookieHtmlScenario();
+  await runExpiredCookieAutoRefreshScenario();
   await runBrowserHtmlScenario();
 }
 
@@ -120,6 +123,114 @@ async function runMockScenario() {
   } finally {
     await dispose();
     await closeServer(server);
+  }
+}
+
+async function runDashboardCachePersistenceScenario() {
+  const dashboardCachePath = path.resolve(
+    process.cwd(),
+    ".local-state",
+    "smoke-dashboard-cache.json"
+  );
+  const cachePayload = {
+    cachedAt: "2026-06-02T12:00:00.000Z",
+    healthPayload: {
+      ok: true,
+      config: {
+        port: 0
+      },
+      now: "2026-06-02T12:00:00.000Z"
+    },
+    payload: {
+      snapshot: {
+        source: "mock",
+        fetchedAt: "2026-06-02T12:00:00.000Z",
+        recordCount: 1,
+        records: [
+          {
+            id: "REQ-1",
+            title: "Persist last dashboard state"
+          }
+        ]
+      },
+      summary: {
+        enabled: true,
+        summary: "Keep the current dashboard visible after relaunch."
+      },
+      parser: {
+        mode: "structured",
+        parsed: {
+          items: [
+            {
+              id: "REQ-1",
+              title: "Persist last dashboard state",
+              urgency: "high",
+              nextAction: "Restore the saved dashboard cache on startup.",
+              blockers: []
+            }
+          ]
+        }
+      }
+    },
+    controls: {
+      includeSummary: true,
+      parserTestchat: false,
+      focus: "Tell me what matters today.",
+      parserFocus: "Extract urgency and next action."
+    }
+  };
+
+  fs.rmSync(dashboardCachePath, { force: true });
+
+  const firstHandle = startServer({
+    port: 0,
+    portalSourceMode: "mock",
+    openAiEnabled: false,
+    openAiApiKey: "",
+    dashboardCacheFile: dashboardCachePath
+  });
+
+  try {
+    await firstHandle.ready;
+
+    const address = firstHandle.server.address();
+    const port = typeof address === "object" && address ? address.port : 3000;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    await fetchJson(`${baseUrl}/api/dashboard/cache`, {
+      method: "POST",
+      body: JSON.stringify(cachePayload)
+    });
+  } finally {
+    await firstHandle.dispose();
+    await closeServer(firstHandle.server);
+  }
+
+  const secondHandle = startServer({
+    port: 0,
+    portalSourceMode: "mock",
+    openAiEnabled: false,
+    openAiApiKey: "",
+    dashboardCacheFile: dashboardCachePath
+  });
+
+  try {
+    await secondHandle.ready;
+
+    const address = secondHandle.server.address();
+    const port = typeof address === "object" && address ? address.port : 3000;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const cachedDashboard = await fetchJson(`${baseUrl}/api/dashboard/cache`);
+
+    console.log(
+      "Dashboard cache survives restart:",
+      cachedDashboard?.payload?.snapshot?.recordCount === 1 &&
+        cachedDashboard?.controls?.focus === "Tell me what matters today."
+    );
+  } finally {
+    await secondHandle.dispose();
+    await closeServer(secondHandle.server);
+    fs.rmSync(dashboardCachePath, { force: true });
   }
 }
 
@@ -227,6 +338,49 @@ async function runIframeHtmlScenario() {
       "Iframe assigned lead from DevItem OK:",
       preview.snapshot.records[1]?.owner === "Morgan Lee" &&
         parserPayload.Records[1]?.["Assigned Lead"] === "Morgan Lee"
+    );
+  } finally {
+    await dispose();
+    await closeServer(server);
+    await closeServer(fauxPortal.server);
+  }
+}
+
+async function runAutoRedirectFormScenario() {
+  const fauxPortal = await startFauxPortalServer();
+  const portalUrl = `http://127.0.0.1:${fauxPortal.port}/redirect-portal`;
+
+  const { server, ready, dispose } = startServer({
+    port: 0,
+    portalSourceMode: "http-html",
+    portalTargetUrl: portalUrl,
+    portalFrameSelector: "iframe[src*='todolist']",
+    portalItemSelector: "tr:has(a[href*='editid='])",
+    portalLinkSelector: "a[href*='editid=']",
+    portalTitleSelector: "a[href*='request/']",
+    portalFollowDetailLinks: true,
+    portalMaxDetailPages: 2,
+    portalDetailContentSelector: "#request-detail",
+    portalDetailTitleSelector: "h1",
+    openAiEnabled: false,
+    openAiApiKey: ""
+  });
+
+  try {
+    await ready;
+
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 3000;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const preview = await fetchJson(`${baseUrl}/api/portal/preview`, {
+      method: "POST",
+      body: JSON.stringify({ includeSummary: false })
+    });
+
+    console.log(
+      "Auto-post redirect crawl OK:",
+      preview.snapshot.target.includes("/requests-frame?todolist=1") &&
+        preview.snapshot.records[0]?.detailPageTitle === "Request A-102"
     );
   } finally {
     await dispose();
@@ -410,9 +564,136 @@ async function runCookieHtmlScenario() {
   }
 }
 
+async function runExpiredCookieAutoRefreshScenario() {
+  const executablePath = detectBrowserExecutablePath();
+
+  if (!executablePath) {
+    console.log(
+      "Expired-cookie auto-refresh crawl skipped: no local browser executable detected."
+    );
+    return;
+  }
+
+  const fauxPortal = await startFauxPortalServer();
+  const cookieCachePath = path.resolve(
+    process.cwd(),
+    ".local-auth",
+    "smoke-expired-portal-cookie-cache.json"
+  );
+  const profilePath = path.resolve(
+    process.cwd(),
+    ".local-browser",
+    "smoke-expired-cookie-profile"
+  );
+
+  fs.rmSync(cookieCachePath, { force: true });
+  clearPortalCookieCache(cookieCachePath);
+  fs.mkdirSync(path.dirname(cookieCachePath), { recursive: true });
+  fs.writeFileSync(
+    cookieCachePath,
+    JSON.stringify(
+      {
+        savedAt: "2026-06-04T15:00:00.000Z",
+        targetUrl: `http://127.0.0.1:${fauxPortal.port}/cookie-redirect-portal`,
+        sourceMode: "cookie-html",
+        cookieHeader: "PortalAuth=stale",
+        cookies: []
+      },
+      null,
+      2
+    )
+  );
+
+  const { server, ready, dispose } = startServer({
+    port: 0,
+    portalSourceMode: "cookie-html",
+    portalTargetUrl: `http://127.0.0.1:${fauxPortal.port}/cookie-redirect-portal`,
+    portalCookieCacheFile: cookieCachePath,
+    portalFrameSelector: "iframe[src*='cookie-todolist']",
+    portalItemSelector: "tr:has(a[href*='editid='])",
+    portalLinkSelector: "a[href*='editid=']",
+    portalTitleSelector: "td:nth-child(2) a",
+    portalDetailSelector: "td:nth-child(4)",
+    portalDateSelector: "td:nth-child(5)",
+    portalOwnerSelector: "td:nth-child(6)",
+    portalFollowDetailLinks: true,
+    portalMaxDetailPages: 2,
+    portalDetailContentSelector: "#request-detail",
+    portalDetailTitleSelector: "h1",
+    playwrightExecutablePath: executablePath,
+    playwrightUserDataDir: profilePath,
+    playwrightConnectToExisting: false,
+    playwrightHeadless: true,
+    playwrightNavigationTimeoutMs: 30000,
+    openAiEnabled: false,
+    openAiApiKey: ""
+  });
+
+  try {
+    await ready;
+
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 3000;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const preview = await fetchJson(`${baseUrl}/api/portal/preview`, {
+      method: "POST",
+      body: JSON.stringify({ includeSummary: false })
+    });
+
+    console.log(
+      "Expired-cookie auto-refresh OK:",
+      preview.snapshot.source === "cookie-html" &&
+        preview.snapshot.records[0]?.detailPageTitle === "Request A-102"
+    );
+    const cachedCookie = readPortalCookieCache(cookieCachePath);
+    console.log(
+      "Expired-cookie cache recovered:",
+      cachedCookie?.cookieHeader?.includes("PortalAuth=valid") === true &&
+        cachedCookie?.sourceMode === "cookie-html"
+    );
+  } finally {
+    await dispose();
+    await closeServer(server);
+    await closeServer(fauxPortal.server);
+    fs.rmSync(cookieCachePath, { force: true });
+    clearPortalCookieCache(cookieCachePath);
+    fs.rmSync(profilePath, { force: true, recursive: true });
+  }
+}
+
 async function startFauxPortalServer() {
   const server = http.createServer((request, response) => {
+    if (request.url === "/redirect-portal") {
+      response.writeHead(200, { "Content-Type": "text/html" });
+      response.end(buildAutoRedirectPortalPage());
+      return;
+    }
+
     if (request.url === "/portal") {
+      response.writeHead(200, { "Content-Type": "text/html" });
+      response.end(buildOuterPortalPage());
+      return;
+    }
+
+    if (
+      request.url?.startsWith("/internaloredirect-cookie") &&
+      request.method === "POST"
+    ) {
+      if (!request.headers.cookie?.includes("PortalAuth=valid")) {
+        response.writeHead(400, { "Content-Type": "text/html" });
+        response.end(buildBenchmarkTeamSignInPage());
+        return;
+      }
+
+      response.writeHead(200, { "Content-Type": "text/html" });
+      response.end(buildCookieOuterPortalPage());
+      return;
+    }
+
+    if (
+      request.url?.startsWith("/internaloredirect") &&
+      request.method === "POST"
+    ) {
       response.writeHead(200, { "Content-Type": "text/html" });
       response.end(buildOuterPortalPage());
       return;
@@ -424,6 +705,15 @@ async function startFauxPortalServer() {
         "Set-Cookie": "PortalAuth=valid; Path=/; HttpOnly"
       });
       response.end(buildCookieOuterPortalPage());
+      return;
+    }
+
+    if (request.url === "/cookie-redirect-portal") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Set-Cookie": "PortalAuth=valid; Path=/; HttpOnly"
+      });
+      response.end(buildCookieRedirectPortalPage());
       return;
     }
 
@@ -515,12 +805,69 @@ function buildOuterPortalPage() {
   `;
 }
 
+function buildAutoRedirectPortalPage() {
+  return `
+    <html>
+      <body>
+        <form
+          id="redirectForm"
+          method="post"
+          action="/internaloredirect"
+        >
+          <input type="hidden" id="currenturl" name="currenturl" value="" />
+          <input type="hidden" name="cookiepath" value="/gsportal" />
+        </form>
+        <script>
+          document.getElementById('redirectForm').submit();
+        </script>
+      </body>
+    </html>
+  `;
+}
+
 function buildCookieOuterPortalPage() {
   return `
     <html>
       <body>
         <h1>Benchmark Portal</h1>
         <iframe src="/cookie-requests-frame?cookie-todolist=1" title="To-Do List Items"></iframe>
+      </body>
+    </html>
+  `;
+}
+
+function buildCookieRedirectPortalPage() {
+  return `
+    <html>
+      <body>
+        <form
+          id="redirectForm"
+          method="post"
+          action="/internaloredirect-cookie"
+        >
+          <input type="hidden" id="currenturl" name="currenturl" value="" />
+          <input type="hidden" name="cookiepath" value="/gsportal" />
+        </form>
+        <script>
+          document.getElementById('redirectForm').submit();
+        </script>
+      </body>
+    </html>
+  `;
+}
+
+function buildBenchmarkTeamSignInPage() {
+  return `
+    <!DOCTYPE html>
+    <html class="login-pf">
+      <head>
+        <meta charset="utf-8" />
+        <title>Sign in to benchmarkteam</title>
+      </head>
+      <body>
+        <main>
+          <h1>Sign in to benchmarkteam</h1>
+        </main>
       </body>
     </html>
   `;

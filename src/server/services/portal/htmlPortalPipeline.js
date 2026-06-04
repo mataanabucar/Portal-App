@@ -7,7 +7,13 @@ export async function runHtmlPortalPipeline({
   targetUrl,
   fetchHtmlPage
 }) {
-  const outerPage = await fetchHtmlPage(targetUrl, "HTML");
+  const initialOuterPage = await fetchHtmlPage(targetUrl, "HTML");
+  assertNotMicrosoftLoginPage(initialOuterPage);
+
+  const outerPage = await followAutoRedirectForms({
+    page: initialOuterPage,
+    fetchHtmlPage
+  });
   assertNotMicrosoftLoginPage(outerPage);
 
   const extractionTarget = await resolveExtractionTarget({
@@ -45,16 +51,23 @@ export function isMicrosoftLoginPage({ url, html }) {
 
   return (
     normalizedUrl.includes("login.microsoftonline.com") ||
-    normalizedHtml.includes("sign in to your account")
+    normalizedUrl.includes("authna.benchmarkdigital.com") ||
+    normalizedUrl.includes("/auth/realms/benchmarkteam/") ||
+    normalizedHtml.includes("sign in to your account") ||
+    normalizedHtml.includes("sign in to benchmarkteam")
   );
 }
 
 export function assertNotMicrosoftLoginPage(page) {
   if (isMicrosoftLoginPage(page)) {
-    throw new Error(
-      "Portal request redirected to Microsoft login. Provide an authenticated PORTAL_COOKIE or use browser-html mode."
-    );
+    throw buildSignInRedirectError();
   }
+}
+
+export function buildSignInRedirectError() {
+  return new Error(
+    "Portal request redirected to sign-in. Provide an authenticated PORTAL_COOKIE or use browser-html mode."
+  );
 }
 
 async function resolveExtractionTarget({ config, outerPage, fetchHtmlPage }) {
@@ -85,6 +98,27 @@ async function resolveExtractionTarget({ config, outerPage, fetchHtmlPage }) {
     html: framePage.html,
     baseUrl: framePage.finalUrl
   };
+}
+
+async function followAutoRedirectForms({ page, fetchHtmlPage }) {
+  let currentPage = page;
+
+  for (let idxRedirect = 0; idxRedirect < 3; idxRedirect += 1) {
+    const redirectRequest = buildAutoRedirectRequest(currentPage);
+
+    if (!redirectRequest) {
+      return currentPage;
+    }
+
+    currentPage = await fetchHtmlPage(
+      redirectRequest.url,
+      "HTML redirect form",
+      redirectRequest.request
+    );
+    assertNotMicrosoftLoginPage(currentPage);
+  }
+
+  return currentPage;
 }
 
 function extractRecords({ config, html, baseUrl }) {
@@ -257,6 +291,114 @@ function resolveHref(baseUrl, href) {
 
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function buildAutoRedirectRequest(page) {
+  const $ = cheerio.load(page.html);
+  const form = $("#redirectForm").first();
+  const action = form.attr("action") || "";
+  const method = normalizeMethod(form.attr("method") || "GET");
+
+  if (!form.length || !action || !hasAutoSubmitScript($)) {
+    return null;
+  }
+
+  const formData = buildFormData($, form, page.finalUrl);
+  const actionUrl = resolveHref(page.finalUrl, action);
+
+  if (!actionUrl) {
+    return null;
+  }
+
+  if (method === "GET") {
+    const url = new URL(actionUrl);
+
+    for (const [name, value] of formData.entries()) {
+      url.searchParams.append(name, value);
+    }
+
+    return {
+      url: url.toString(),
+      request: {
+        method
+      }
+    };
+  }
+
+  if (method === "POST") {
+    return {
+      url: actionUrl,
+      request: {
+        method,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: formData.toString()
+      }
+    };
+  }
+
+  return null;
+}
+
+function hasAutoSubmitScript($) {
+  return $("script")
+    .toArray()
+    .some((element) => /submit\s*\(/i.test($(element).html() || ""));
+}
+
+function buildFormData($, form, currentUrl) {
+  const formData = new URLSearchParams();
+
+  form.find("input, textarea, select").each((_idxField, element) => {
+    const field = $(element);
+    const name = field.attr("name");
+
+    if (!name) {
+      return;
+    }
+
+    const value = resolveFormFieldValue(field, element, currentUrl);
+    formData.append(name, value);
+  });
+
+  return formData;
+}
+
+function resolveFormFieldValue(field, element, currentUrl) {
+  const tagName = String(element?.tagName || element?.name || "").toLowerCase();
+  const type = String(field.attr("type") || "").toLowerCase();
+  const fieldId = String(field.attr("id") || "").toLowerCase();
+  const fieldName = String(field.attr("name") || "").toLowerCase();
+
+  if ((type === "checkbox" || type === "radio") && !field.attr("checked")) {
+    return "";
+  }
+
+  if (tagName === "textarea") {
+    return field.text() || "";
+  }
+
+  if (tagName === "select") {
+    const selectedOption = field.find("option[selected]").first();
+    const option = selectedOption.length
+      ? selectedOption
+      : field.find("option").first();
+
+    return option.attr("value") || option.text() || "";
+  }
+
+  const value = field.attr("value") || "";
+
+  if (!value && (fieldId === "currenturl" || fieldName === "currenturl")) {
+    return currentUrl;
+  }
+
+  return value;
+}
+
+function normalizeMethod(value) {
+  return String(value || "GET").trim().toUpperCase();
 }
 
 function buildRawPreview(html) {

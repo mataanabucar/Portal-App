@@ -7,7 +7,10 @@ import {
   describeBrowserSession,
   shouldRecreateSession
 } from "./browserSession.js";
-import { isMicrosoftLoginPage } from "./htmlPortalPipeline.js";
+import {
+  buildSignInRedirectError,
+  isMicrosoftLoginPage
+} from "./htmlPortalPipeline.js";
 import {
   capturePortalCookieCache,
   readPortalCookieCache,
@@ -214,10 +217,12 @@ export function createCookieHtmlPortalSource(config) {
   }
 }
 
-function buildHeaders(config, cookieHeader) {
-  const headers = shouldSendBody(config.portalMethod)
-    ? { "Content-Type": "application/json", ...config.portalHeaders }
-    : config.portalHeaders;
+function buildHeadersForRequest(config, cookieHeader, method, requestHeaders) {
+  const headers = { ...config.portalHeaders, ...requestHeaders };
+
+  if (shouldSendBody(method) && !hasHeader(headers, "Content-Type")) {
+    headers["Content-Type"] = "application/json";
+  }
 
   return cookieHeader ? { ...headers, Cookie: cookieHeader } : headers;
 }
@@ -236,7 +241,7 @@ function shouldRefreshCookies(error) {
   const message = String(error?.message || error).toLowerCase();
 
   return (
-    message.includes("redirected to microsoft login") ||
+    message.includes("redirected to sign-in") ||
     message.includes("request failed with 401") ||
     message.includes("request failed with 403")
   );
@@ -247,13 +252,11 @@ function normalizeCookieHeader(value) {
 }
 
 async function fetchHtml(url, config, label, methodOverride, cookieHeader) {
-  const method = methodOverride || config.portalMethod;
+  const request = buildRequest(config, methodOverride, cookieHeader);
   const response = await fetch(url, {
-    method,
-    headers: buildHeaders(config, cookieHeader),
-    body: shouldSendBody(method)
-      ? JSON.stringify(config.portalBody)
-      : undefined,
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
     signal: AbortSignal.timeout(config.requestTimeoutMs),
     redirect: "follow"
   });
@@ -267,12 +270,59 @@ async function fetchHtml(url, config, label, methodOverride, cookieHeader) {
   };
 }
 
+function buildRequest(config, requestOverride, cookieHeader) {
+  if (
+    requestOverride &&
+    typeof requestOverride === "object" &&
+    !Array.isArray(requestOverride)
+  ) {
+    const method = normalizeMethod(requestOverride.method || config.portalMethod);
+
+    return {
+      method,
+      headers: buildHeadersForRequest(
+        config,
+        cookieHeader,
+        method,
+        requestOverride.headers || {}
+      ),
+      body:
+        requestOverride.body ??
+        (shouldSendBody(method) ? JSON.stringify(config.portalBody) : undefined)
+    };
+  }
+
+  const method = normalizeMethod(requestOverride || config.portalMethod);
+
+  return {
+    method,
+    headers: buildHeadersForRequest(config, cookieHeader, method, {}),
+    body: shouldSendBody(method) ? JSON.stringify(config.portalBody) : undefined
+  };
+}
+
+function hasHeader(headers, name) {
+  const normalizedName = name.toLowerCase();
+  return Object.keys(headers).some(
+    (headerName) => headerName.toLowerCase() === normalizedName
+  );
+}
+
+function normalizeMethod(value) {
+  return String(value || "GET").trim().toUpperCase();
+}
+
 async function assertSuccess(response, label) {
   if (response.ok) {
     return;
   }
 
   const detail = await response.text();
+
+  if (isMicrosoftLoginPage({ url: response.url, html: detail })) {
+    throw buildSignInRedirectError();
+  }
+
   throw new Error(
     `${label} portal request failed with ${response.status}: ${detail.slice(0, 400)}`
   );

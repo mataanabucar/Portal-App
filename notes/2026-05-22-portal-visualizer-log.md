@@ -68,3 +68,18 @@
 - Improved browser-debug diagnostics so failed refreshes keep any successful `/api/health` response visible and replace the generic `Failed to fetch` message with guidance to open the app from the local server URL instead of a file or unrelated static origin.
 - Added a repo-root transfer summary covering the current dev commands, browser-origin debugging caveat, verified API behavior, and the key files to inspect next.
 - Added a shared portal cookie resume cache backed by a process-global store plus `.local-auth/portal-cookie-cache.json`, and taught `browser-html` to seed it so later `cookie-html` runs can resume without reopening the browser.
+
+## 2026-06-02
+
+- Fixed desktop relaunch state loss by adding a filesystem-backed dashboard cache at `.local-state/dashboard-cache.json`, exposed through new `/api/dashboard/cache` routes.
+- Updated the frontend startup flow to restore the saved dashboard payload plus the control values that generated it, instead of depending only on `localStorage` scoped to a random embedded-server port.
+- Added smoke-test coverage that writes a dashboard cache, restarts the server, and verifies the cached dashboard survives the restart.
+
+## 2026-06-04
+
+- Verified against the live `https://tools.benchmarkdigital.com/gsportal/index_old.cfm` response that the outer page can now be an auto-submitting redirect form posting to `login/internaloredirect.cfm`, which explains the local `No iframe src found for PORTAL_FRAME_SELECTOR` failure when raw HTML mode treats that stub page as the real portal document.
+- Updated the shared HTML portal pipeline so `http-html` and `cookie-html` follow up to three auto-submit redirect forms before iframe extraction, preserving form fields such as `currenturl` and posting as `application/x-www-form-urlencoded` when required.
+- Expanded sign-in detection to catch the current Benchmark auth broker page as well as the prior Microsoft login pattern, so expired cookies now fail with a direct sign-in/auth message instead of a misleading iframe-selector error.
+- Added smoke-test coverage for an auto-post outer-page redirect that resolves into the existing `todolist` iframe flow before linked-detail extraction.
+- Fixed the cookie-refresh fallback so non-OK auth broker pages, including the current `400` `Sign in to benchmarkteam` HTML returned during the redirect-form POST, are normalized into the same sign-in error path that triggers automatic browser-based cookie renewal.
+- Added a stale-cookie smoke-test regression that seeds an expired cache, forces the redirect-form POST to hit a benchmarkteam sign-in page, and verifies `cookie-html` automatically recovers by refreshing cookies through the browser path and then reloading the request iframe successfully.

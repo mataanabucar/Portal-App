@@ -78,10 +78,14 @@ export function createPlaywrightHtmlPortalSource(config) {
   };
 
   async function fetchHtmlPage(url, label, methodOverride) {
-    const method = methodOverride || config.portalMethod;
+    const method = normalizeMethod(
+      typeof methodOverride === "object" && methodOverride !== null
+        ? methodOverride.method || config.portalMethod
+        : methodOverride || config.portalMethod
+    );
 
     if (method !== "GET" && method !== "HEAD") {
-      throw new Error("browser-html mode currently supports GET requests only.");
+      throw new Error("browser-html mode currently supports GET and HEAD requests only.");
     }
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -114,7 +118,7 @@ export function createPlaywrightHtmlPortalSource(config) {
           await page.bringToFront().catch(() => undefined);
 
           throw new Error(
-            "Browser session reached Microsoft login. Complete sign-in in the opened browser window, then retry."
+            "Browser session reached the sign-in page. Complete sign-in in the opened browser window, then retry."
           );
         }
 
@@ -217,4 +221,8 @@ function assertSupportedMethod(method) {
   if (method !== "GET" && method !== "HEAD") {
     throw new Error("browser-html mode only supports GET requests.");
   }
+}
+
+function normalizeMethod(value) {
+  return String(value || "GET").trim().toUpperCase();
 }
