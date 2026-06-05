@@ -750,6 +750,32 @@ button:disabled {
 	padding: 10px 12px;
 }
 
+.due-badge {
+	align-items: flex-start;
+	gap: 2px;
+	padding: 6px 13px;
+}
+
+.due-badge__date,
+.due-badge__distance {
+	display: block;
+	white-space: nowrap;
+}
+
+.due-badge__date {
+	font-size: 0.77rem;
+	font-weight: 700;
+	line-height: 1.08;
+}
+
+.due-badge__distance {
+	font-size: 0.58rem;
+	font-weight: 700;
+	line-height: 1.08;
+	letter-spacing: 0.06em;
+	opacity: 0.9;
+}
+
 .urgency-badge {
 	color: #ecfeff;
 	background: rgba(34, 211, 238, 0.14);
@@ -1208,6 +1234,15 @@ pre::-webkit-scrollbar-thumb {
 .summary-note {
 	color: var(--text-muted);
 	font-size: 0.94rem;
+}
+
+.debug-call-label {
+	margin: 16px 0 8px;
+	color: var(--text-muted);
+	font-size: 0.72rem;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
 }
 
 .summary-empty {
@@ -2374,4 +2409,91 @@ body[data-loading="true"] .stat-card::after {
 		opacity: 0;
 		transform: none;
 	}
+}
+
+.priority-footer,
+.todo-footer {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+	align-items: center;
+}
+
+.priority-footer {
+	position: relative;
+	z-index: 1;
+	margin-top: 18px;
+}
+
+.priority-footer-note {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 0.88rem;
+	text-align: right;
+}
+
+.priority-actions,
+.todo-footer-actions,
+.todo-footer-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+}
+
+.todo-open-link {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 10px 14px;
+	border-radius: 999px;
+	color: var(--bg);
+	font-size: 0.77rem;
+	font-weight: 700;
+	line-height: 1;
+	letter-spacing: 0.08em;
+	text-decoration: none;
+	background: linear-gradient(135deg,
+			rgba(165, 243, 252, 0.98),
+			rgba(34, 211, 238, 0.92));
+	border: 1px solid rgba(165, 243, 252, 0.4);
+	box-shadow: 0 10px 22px rgba(34, 211, 238, 0.18);
+	transition:
+		transform var(--transition-fast),
+		box-shadow var(--transition-fast),
+		filter var(--transition-fast);
+}
+
+.todo-open-link:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 14px 28px rgba(34, 211, 238, 0.24);
+	filter: saturate(1.05);
+}
+
+.todo-open-link:active {
+	transform: translateY(0);
+}
+
+@media (max-width: 960px) {
+
+	.priority-footer,
+	.todo-footer {
+		align-items: start;
+		flex-direction: column;
+	}
+
+	.priority-footer-note,
+	.todo-footer-meta {
+		text-align: left;
+		justify-content: start;
+	}
+}
+
+.todo-card-header,
+.priority-badges {
+	align-items: flex-start;
+}
+
+.due-badge.urgency-badge {
+	padding: 6px 13px;
 }

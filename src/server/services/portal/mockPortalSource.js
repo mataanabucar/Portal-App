@@ -23,6 +23,7 @@ function buildMockRecords() {
   return [
     {
       id: "A-102",
+      href: "https://portal.example.test/request/A-102",
       title: "Site inspection follow-up",
       status: "Open",
       owner: "Jordan",
@@ -32,6 +33,7 @@ function buildMockRecords() {
     },
     {
       id: "A-118",
+      href: "https://portal.example.test/request/A-118",
       title: "Supplier audit prep",
       status: "At Risk",
       owner: "Taylor",
@@ -41,6 +43,7 @@ function buildMockRecords() {
     },
     {
       id: "A-141",
+      href: "https://portal.example.test/request/A-141",
       title: "Training exception review",
       status: "Open",
       owner: "Jordan",

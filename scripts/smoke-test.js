@@ -117,6 +117,17 @@ async function runMockScenario() {
         dashboard.parser.mode === "structured"
     );
     console.log(
+      "Dashboard record link retained:",
+      dashboard.snapshot.records[0]?.id === "A-102" &&
+        dashboard.snapshot.records[0]?.href ===
+          "https://portal.example.test/request/A-102"
+    );
+    console.log(
+      "Parser response version OK:",
+      parser.parser.debug?.responseVersion === "2026-06-portal-parse-v2" &&
+        dashboard.parser.debug?.responseVersion === "2026-06-portal-parse-v2"
+    );
+    console.log(
       "OpenAI payload fields OK:",
       hasOnlyAllowedOpenAiFields(parserPayload)
     );
@@ -149,6 +160,7 @@ async function runDashboardCachePersistenceScenario() {
         records: [
           {
             id: "REQ-1",
+            href: "https://portal.example.test/request/REQ-1",
             title: "Persist last dashboard state"
           }
         ]
@@ -225,7 +237,9 @@ async function runDashboardCachePersistenceScenario() {
     console.log(
       "Dashboard cache survives restart:",
       cachedDashboard?.payload?.snapshot?.recordCount === 1 &&
-        cachedDashboard?.controls?.focus === "Tell me what matters today."
+        cachedDashboard?.controls?.focus === "Tell me what matters today." &&
+        cachedDashboard?.payload?.snapshot?.records?.[0]?.href ===
+          "https://portal.example.test/request/REQ-1"
     );
   } finally {
     await secondHandle.dispose();
@@ -286,6 +300,12 @@ async function runLinkedHtmlScenario() {
       preview.snapshot.records[0]?.owner === "Avery Quinn" &&
         parserPayload.Records[0]?.["Assigned Lead"] === "Avery Quinn"
     );
+    console.log(
+      "Detail link retained in client snapshot:",
+      preview.snapshot.records[0]?.id === "A-102" &&
+        preview.snapshot.records[0]?.href ===
+        `http://127.0.0.1:${fauxPortal.port}/request/A-102`
+    );
   } finally {
     await dispose();
     await closeServer(server);
@@ -338,6 +358,11 @@ async function runIframeHtmlScenario() {
       "Iframe assigned lead from DevItem OK:",
       preview.snapshot.records[1]?.owner === "Morgan Lee" &&
         parserPayload.Records[1]?.["Assigned Lead"] === "Morgan Lee"
+    );
+    console.log(
+      "Iframe action item IDs retained:",
+      preview.snapshot.records[0]?.id === "1229030" &&
+        preview.snapshot.records[1]?.id === "1232413"
     );
   } finally {
     await dispose();
@@ -465,6 +490,10 @@ async function runBrowserHtmlScenario() {
       "Browser assigned lead from DevItem OK:",
       preview.snapshot.records[0]?.owner === "Avery Quinn" &&
         parserPayload.Records[0]?.["Assigned Lead"] === "Avery Quinn"
+    );
+    console.log(
+      "Browser action item ID retained:",
+      preview.snapshot.records[0]?.id === "1229030"
     );
     const cachedCookie = readPortalCookieCache(browserCookieCachePath);
     console.log(

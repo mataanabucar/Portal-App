@@ -150,10 +150,16 @@ function buildRecord({ $, config, element, index, baseUrl }) {
   const detail =
     selectText(row, config.portalDetailSelector) || sanitizeExtractedText(row.text());
   const status = selectText(row, config.portalStatusSelector);
-  const href = resolveHref(baseUrl, selectHref(row, config.portalLinkSelector));
+  const rawHref = selectHref(row, config.portalLinkSelector);
+  const href = resolveHref(baseUrl, rawHref);
+  const id = resolveRecordId({
+    href,
+    rawIdText: selectText(row, config.portalLinkSelector),
+    index
+  });
 
   return {
-    id: `row-${index + 1}`,
+    id,
     title: title || selectText(row, "a") || `Record ${index + 1}`,
     status,
     owner: selectText(row, config.portalOwnerSelector),
@@ -275,6 +281,65 @@ function selectFormValue($, selector) {
   }
 
   return sanitizeExtractedText(field.attr("value") || "");
+}
+
+function resolveRecordId({ href, rawIdText, index }) {
+  const editId = extractEditIdFromHref(href);
+
+  if (editId) {
+    return editId;
+  }
+
+  const visibleId = extractNumericId(rawIdText);
+
+  if (visibleId) {
+    return visibleId;
+  }
+
+  const pathId = extractPathIdFromHref(href);
+
+  if (pathId) {
+    return pathId;
+  }
+
+  return `row-${index + 1}`;
+}
+
+function extractEditIdFromHref(href) {
+  if (!href) {
+    return "";
+  }
+
+  try {
+    const url = new URL(href);
+    return (
+      normalizeText(url.searchParams.get("EditID")) ||
+      normalizeText(url.searchParams.get("editid"))
+    );
+  } catch (error) {
+    const match = href.match(/[?&]editid=(\d+)/i);
+    return match?.[1] || "";
+  }
+}
+
+function extractNumericId(value) {
+  const normalizedValue = normalizeText(value);
+  return /^\d{4,}$/.test(normalizedValue) ? normalizedValue : "";
+}
+
+function extractPathIdFromHref(href) {
+  if (!href) {
+    return "";
+  }
+
+  try {
+    const url = new URL(href);
+    const pathSegments = url.pathname.split("/").filter(Boolean);
+    return normalizeText(pathSegments.at(-1));
+  } catch (error) {
+    const pathMatch = href.match(/\/([^/?#]+)(?:[?#]|$)/);
+    return normalizeText(pathMatch?.[1] || "");
+  }
 }
 
 function resolveHref(baseUrl, href) {

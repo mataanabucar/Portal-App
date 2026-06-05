@@ -3,7 +3,7 @@ import OpenAI from "openai";
 import { createDisabledPortalParser } from "./disabledPortalParser.js";
 import { buildPortalParserInput } from "./portalParserInput.js";
 
-const RESPONSE_VERSION = "2026-05-portal-parse-v1";
+const RESPONSE_VERSION = "2026-06-portal-parse-v2";
 const RESPONSE_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -53,14 +53,19 @@ const RESPONSE_SCHEMA = {
 };
 
 const SYSTEM_PROMPT = [
-  "You parse internal portal request data for a single user.",
+  "You review internal portal request data for a single user.",
   "Return only JSON that matches the provided schema.",
-  "Create one item for each visible request record.",
+  "Create exactly one item for each visible request record in the same order as the input records.",
   "Use only information visible in the provided portal data.",
+  "Do not guess values that are hidden, unavailable, or not present.",
   "If a field is unknown, return an empty string.",
-  "Set urgency based on visible due dates, risk language, and obvious blockers.",
-  "Write nextAction as one short practical sentence.",
-  "Keep blockers limited to explicit blockers or missing information."
+  "Do not invent request IDs, titles, owners, or dates when they are not visible.",
+  "Write overview as a short queue-level brief that highlights the most urgent work and common blockers.",
+  "Write each summary as a concise factual description of the main ask, expected deliverable, and any relevant business or request-history context.",
+  "Write nextAction as one short practical sentence for the assigned lead.",
+  "Keep blockers limited to explicit blockers, dependencies, or missing information visible in the record.",
+  "Set urgency only from visible due dates, request wording, risk language, and visible blockers.",
+  "Lower confidence when key details are missing, unclear, or only weakly implied."
 ].join(" ");
 
 export function createPortalParser(config) {

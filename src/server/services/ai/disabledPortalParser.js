@@ -1,5 +1,7 @@
 import { buildPortalParserInput } from "./portalParserInput.js";
 
+const RESPONSE_VERSION = "2026-06-portal-parse-v2";
+
 export function createDisabledPortalParser(config) {
   const reason = config.openAiApiKey
     ? "Enable OPENAI_ENABLED=true to use the portal parser."
@@ -54,7 +56,7 @@ function buildDebugObject(config, mode) {
     endpoint: "/api/portal/parse",
     mode,
     model: config.openAiModel,
-    responseVersion: "2026-05-portal-parse-v1"
+    responseVersion: RESPONSE_VERSION
   };
 }
 

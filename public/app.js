@@ -3,13 +3,17 @@ const elements = {
   dashboardRefresh: document.querySelector("#refresh-dashboard"),
   dataAge: document.querySelector("#data-age"),
   health: document.querySelector("#health-output"),
+  healthCurl: document.querySelector("#health-curl"),
   heroLede: document.querySelector("#hero-lede"),
   includeSummary: document.querySelector("#include-summary"),
+  dashboardCurl: document.querySelector("#dashboard-curl"),
   parser: document.querySelector("#parser-output"),
+  parserCurl: document.querySelector("#parser-curl"),
   parserFocus: document.querySelector("#parser-focus-text"),
   parserTestchat: document.querySelector("#parser-testchat"),
   prioritySpotlight: document.querySelector("#priority-spotlight"),
   snapshot: document.querySelector("#snapshot-output"),
+  snapshotCurl: document.querySelector("#snapshot-curl"),
   statBlocked: document.querySelector("#stat-blocked"),
   statMode: document.querySelector("#stat-mode"),
   statTotal: document.querySelector("#stat-total"),
@@ -31,7 +35,7 @@ const defaultValues = {
   focus:
     "Tell me what I need to do today, what is being asked of me, what deliverables are implied, and which requests are most urgent.",
   parserFocus:
-    "Extract each request into structured fields with requester, application, urgency, summary, next action, blockers, and due date."
+    "For each visible request, extract the main ask, expected deliverable, blockers or missing information, urgency, and the clearest next step without guessing hidden values."
 };
 
 let currentViewState = null;
@@ -139,6 +143,7 @@ function readCurrentControls() {
 }
 
 function renderDashboard(payload, healthPayload, options = {}) {
+  const diagnosticsControls = cloneControls(options.controls || readCurrentControls());
   const summaryMarkup = renderSummary(payload.summary, elements.focus.value.trim());
   const todoItems = buildTodoItems(payload);
   const blockedCount = todoItems.filter((item) => item.blockers.length > 0).length;
@@ -148,6 +153,7 @@ function renderDashboard(payload, healthPayload, options = {}) {
 
   currentViewState = {
     cachedAt: options.cachedAt || new Date().toISOString(),
+    controls: diagnosticsControls,
     healthPayload,
     payload
   };
@@ -166,49 +172,72 @@ function renderDashboard(payload, healthPayload, options = {}) {
 
   renderPrioritySpotlight(todoItems, payload.parser);
   renderTodoBoard(todoItems, payload.parser);
+  updateDiagnosticsCurlCommands(diagnosticsControls);
   refreshFreshnessIndicators();
 }
 
 function buildTodoItems(payload) {
+  const snapshotRecords = Array.isArray(payload.snapshot?.records)
+    ? payload.snapshot.records
+    : [];
+
   if (
     payload.parser?.mode === "structured" &&
     Array.isArray(payload.parser?.parsed?.items) &&
     payload.parser.parsed.items.length > 0
   ) {
-    return payload.parser.parsed.items
-      .map((item) => normalizeParsedTodo(item))
+    return buildStructuredTodoItems(payload.parser.parsed.items, snapshotRecords)
       .sort(compareTodoItems);
   }
 
-  return Array.isArray(payload.snapshot?.records)
-    ? payload.snapshot.records
-        .map((record) => normalizeSnapshotTodo(record))
-        .sort(compareTodoItems)
-    : [];
+  return snapshotRecords.map((record) => normalizeSnapshotTodo(record)).sort(compareTodoItems);
 }
 
-function normalizeParsedTodo(item) {
+function buildStructuredTodoItems(parsedItems, snapshotRecords) {
+  if (snapshotRecords.length === 0) {
+    return parsedItems.map((item) => normalizeParsedTodo(item));
+  }
+
+  return snapshotRecords.map((record, index) =>
+    normalizeParsedTodo(parsedItems[index], record)
+  );
+}
+
+function normalizeParsedTodo(item = {}, snapshotRecord = null) {
+  const snapshotTodo = snapshotRecord ? normalizeSnapshotTodo(snapshotRecord) : null;
+  const parsedBlockers = normalizeBlockers(item.blockers);
+  const fallbackBlockers = snapshotTodo?.blockers || [];
+  const hasParsedContent =
+    item && typeof item === "object" && Object.keys(item).length > 0;
+
   return {
-    id: item.id || "",
-    title: item.title || "Untitled request",
-    urgency: normalizeUrgency(item.urgency),
-    nextAction: item.nextAction || "Review this request and determine the next step.",
-    summary: item.summary || "",
-    dueDate: item.dueDate || "",
-    requester: item.requester || "",
-    application: item.application || "",
-    owner: item.owner || "",
-    blockers: Array.isArray(item.blockers)
-      ? item.blockers.filter((blocker) => typeof blocker === "string" && blocker.trim())
-      : [],
+    id: snapshotTodo?.id || item.id || "",
+    href: snapshotRecord?.href || snapshotTodo?.href || "",
+    title: resolveDisplayTitle({
+      parsedTitle: item.title,
+      parsedSummary: item.summary,
+      snapshotTitle: snapshotTodo?.title
+    }),
+    urgency: normalizeUrgency(item.urgency || snapshotTodo?.urgency),
+    nextAction:
+      item.nextAction ||
+      snapshotTodo?.nextAction ||
+      "Review this request and determine the next step.",
+    summary: item.summary || snapshotTodo?.summary || "",
+    dueDate: item.dueDate || snapshotTodo?.dueDate || "",
+    requester: item.requester || snapshotTodo?.requester || "",
+    application: item.application || snapshotTodo?.application || "",
+    owner: item.owner || snapshotTodo?.owner || "",
+    blockers: parsedBlockers.length > 0 ? parsedBlockers : fallbackBlockers,
     confidence: Number.isFinite(item.confidence) ? item.confidence : null,
-    source: "parsed"
+    source: hasParsedContent ? "parsed" : "snapshot"
   };
 }
 
 function normalizeSnapshotTodo(record) {
   return {
     id: record.id || "",
+    href: record.href || "",
     title: record.title || "Untitled request",
     urgency: inferUrgencyFromSnapshot(record),
     nextAction: record.detailPageContent
@@ -223,6 +252,56 @@ function normalizeSnapshotTodo(record) {
     confidence: null,
     source: "snapshot"
   };
+}
+
+function normalizeBlockers(value) {
+  return Array.isArray(value)
+    ? value.filter((blocker) => typeof blocker === "string" && blocker.trim())
+    : [];
+}
+
+function resolveDisplayTitle({ parsedTitle, parsedSummary, snapshotTitle }) {
+  const normalizedParsedTitle = normalizeText(parsedTitle);
+
+  if (normalizedParsedTitle && !isGenericPortalTitle(normalizedParsedTitle)) {
+    return normalizedParsedTitle;
+  }
+
+  const summaryTitle = buildSummaryTitle(parsedSummary);
+
+  if (summaryTitle) {
+    return summaryTitle;
+  }
+
+  const normalizedSnapshotTitle = normalizeText(snapshotTitle);
+
+  if (normalizedSnapshotTitle) {
+    return normalizedSnapshotTitle;
+  }
+
+  return "Untitled request";
+}
+
+function buildSummaryTitle(value) {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const firstSentenceMatch = normalizedValue.match(/^(.+?[.!?])(?:\s|$)/);
+  const candidateTitle = normalizeText(firstSentenceMatch?.[1] || normalizedValue);
+  return clipText(candidateTitle.replace(/[.!?]+$/, ""), 88);
+}
+
+function isGenericPortalTitle(value) {
+  const normalizedValue = normalizeText(value).toLowerCase();
+
+  return (
+    /^help me!?\s*#\d+\b/.test(normalizedValue) ||
+    /^customer request\b/.test(normalizedValue) ||
+    /^record\s+\d+\b/.test(normalizedValue)
+  );
 }
 
 function renderPrioritySpotlight(items, parser) {
@@ -254,8 +333,8 @@ function renderPrioritySpotlight(items, parser) {
         <h2>${escapeHtml(leadItem.title)}</h2>
       </div>
       <div class="priority-badges">
+        ${buildDueBadge(leadItem)}
         <span class="urgency-badge" data-urgency="${escapeHtml(leadItem.urgency)}">${escapeHtml(formatUrgencyLabel(leadItem.urgency))}</span>
-        <span class="todo-id">${escapeHtml(buildTaskLabel(leadItem, 0))}</span>
       </div>
     </div>
     <p class="todo-next-label">Start with</p>
@@ -269,6 +348,10 @@ function renderPrioritySpotlight(items, parser) {
         ? `<p class="priority-blocker-inline">${escapeHtml(blockerPreview)}</p>`
         : ""
     }
+    <div class="priority-footer">
+      ${buildTaskActions(leadItem, 0, "priority-actions")}
+      <p class="priority-footer-note">${escapeHtml(buildPriorityFooterNote(leadItem))}</p>
+    </div>
   `;
 }
 
@@ -315,8 +398,8 @@ function renderTodoBoard(items, parser) {
           <div class="todo-card-top">
             <span class="todo-rank">${escapeHtml(index === 0 ? "Up next" : "In queue")}</span>
             <div class="todo-card-header">
+              ${buildDueBadge(item)}
               <span class="urgency-badge" data-urgency="${escapeHtml(item.urgency)}">${escapeHtml(formatUrgencyLabel(item.urgency))}</span>
-              <span class="todo-id">${escapeHtml(buildTaskLabel(item, index))}</span>
             </div>
           </div>
           <h3>${escapeHtml(item.title)}</h3>
@@ -329,8 +412,11 @@ function renderTodoBoard(items, parser) {
           ${blockersMarkup}
           ${detailsMarkup}
           <div class="todo-footer">
-            <p class="todo-confidence">${escapeHtml(confidenceText)}</p>
-            <p class="todo-status">${escapeHtml(buildFooterStatus(item))}</p>
+            ${buildTaskActions(item, index, "todo-footer-actions")}
+            <div class="todo-footer-meta">
+              <p class="todo-confidence">${escapeHtml(confidenceText)}</p>
+              ${buildFooterStatusMarkup(item)}
+            </div>
           </div>
         </article>
       `;
@@ -338,12 +424,28 @@ function renderTodoBoard(items, parser) {
     .join("");
 }
 
+function buildTaskActions(item, index, className) {
+  const openLink = item.href
+    ? `
+      <a class="todo-open-link" href="${escapeHtml(item.href)}" target="_blank" rel="noreferrer">
+        Open
+      </a>
+    `
+    : "";
+
+  return `
+    <div class="${className}">
+      <span class="todo-id">${escapeHtml(buildTaskLabel(item, index))}</span>
+      ${openLink}
+    </div>
+  `;
+}
+
 function buildMetaChips(item) {
   const metaTokens = [
     item.requester ? `Requester: ${item.requester}` : "",
     item.application ? `App: ${item.application}` : "",
-    item.owner ? `Owner: ${item.owner}` : "",
-    item.dueDate ? `Due: ${item.dueDate}` : ""
+    item.owner ? `Owner: ${item.owner}` : ""
   ].filter(Boolean);
 
   if (metaTokens.length === 0) {
@@ -378,16 +480,12 @@ function buildTaskLabel(item, index) {
   return `Task ${index + 1}`;
 }
 
-function buildPriorityFooter(item) {
-  const parts = [buildFooterStatus(item)];
-
+function buildPriorityFooterNote(item) {
   if (item.blockers.length > 0) {
-    parts.push("Blocked items are surfaced inline below.");
-  } else {
-    parts.push("No blockers were surfaced for this task.");
+    return "Open the request to confirm the unblock step.";
   }
 
-  return parts.join(" ");
+  return "Open the request when you need the full portal page.";
 }
 
 function buildPriorityReason(item) {
@@ -403,15 +501,19 @@ function buildPriorityReason(item) {
 }
 
 function buildFooterStatus(item) {
-  if (item.dueDate) {
-    return `Due ${item.dueDate}`;
-  }
-
   if (item.blockers.length > 0) {
     return "Needs blocker resolution";
   }
 
-  return "Needs review";
+  return "";
+}
+
+function buildFooterStatusMarkup(item) {
+  const statusText = buildFooterStatus(item);
+
+  return statusText
+    ? `<p class="todo-status">${escapeHtml(statusText)}</p>`
+    : "";
 }
 
 function buildHeroLede(todoItems, summary, parser) {
@@ -602,9 +704,7 @@ function parseTaskIdNumber(value) {
 }
 
 function parseDueDateValue(value) {
-  const normalizedValue = normalizeText(value)
-    .replace(/^due:\s*/i, "")
-    .replace(/^[A-Za-z]{3},\s*/, "");
+  const normalizedValue = normalizeDueDateText(value);
 
   if (!normalizedValue) {
     return null;
@@ -696,6 +796,99 @@ function formatParserMode(value) {
 function formatUrgencyLabel(value) {
   const normalizedValue = normalizeUrgency(value);
   return normalizedValue === "critical" ? "Do now" : capitalize(normalizedValue);
+}
+
+function buildDueBadge(item) {
+  const dueDateLabel = formatDueDateBadgeLabel(item?.dueDate);
+
+  if (!dueDateLabel) {
+    return "";
+  }
+
+  return `
+    <span class="due-badge urgency-badge" data-urgency="${escapeHtml(
+      normalizeUrgency(item?.urgency)
+    )}">
+      <span class="due-badge__date">Due: ${escapeHtml(dueDateLabel)}</span>
+      <span class="due-badge__distance">${escapeHtml(
+        formatDueDateDistanceLabel(item?.dueDate)
+      )}</span>
+    </span>
+  `;
+}
+
+function formatDueDateBadgeLabel(value) {
+  const normalizedValue = normalizeDueDateText(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const parsedValue = parseDueDateValue(normalizedValue);
+
+  if (parsedValue === null) {
+    return normalizedValue;
+  }
+
+  return formatUtcDateLabel(parsedValue);
+}
+
+function formatDueDateDistanceLabel(value) {
+  const parsedValue = parseDueDateValue(value);
+
+  if (parsedValue === null) {
+    return "Due date set";
+  }
+
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayDifference = Math.round((parsedValue - todayUtc) / 86_400_000);
+
+  if (dayDifference === 0) {
+    return "Due today";
+  }
+
+  if (dayDifference === 1) {
+    return "In 1 day";
+  }
+
+  if (dayDifference > 1) {
+    return `In ${dayDifference} days`;
+  }
+
+  if (dayDifference === -1) {
+    return "1 day overdue";
+  }
+
+  return `${Math.abs(dayDifference)} days overdue`;
+}
+
+function formatUtcDateLabel(timestamp) {
+  const date = new Date(timestamp);
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const year = String(date.getUTCFullYear()).slice(-2);
+  const monthLabels = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec"
+  ];
+
+  return `${day}-${monthLabels[date.getUTCMonth()]}-${year}`;
+}
+
+function normalizeDueDateText(value) {
+  return normalizeText(value)
+    .replace(/^due:\s*/i, "")
+    .replace(/^[A-Za-z]{3},\s*/, "");
 }
 
 function capitalize(value) {
@@ -919,6 +1112,7 @@ function clearDashboardUi() {
   elements.snapshot.textContent = "No saved portal snapshot yet.";
   elements.parser.textContent = "No saved parser response yet.";
   elements.health.textContent = "No saved health response yet.";
+  updateDiagnosticsCurlCommands(readCurrentControls());
   elements.statTotal.textContent = "0";
   elements.statUrgent.textContent = "0";
   elements.statBlocked.textContent = "0";
@@ -957,7 +1151,8 @@ async function renderCachedDashboardOnStartup() {
 
   applySavedControls(cachedValue.controls);
   renderDashboard(cachedValue.payload, cachedValue.healthPayload, {
-    cachedAt: cachedValue.cachedAt
+    cachedAt: cachedValue.cachedAt,
+    controls: cachedValue.controls || readCurrentControls()
   });
   setStatus("Showing the last saved dashboard snapshot.");
 }
@@ -1069,6 +1264,7 @@ function buildRefreshFailureMessage(errorMessage) {
 }
 
 async function loadDashboard() {
+  const requestControls = cloneControls(readCurrentControls());
   setStatus("Refreshing dashboard from the portal...");
   setStatusPill("Refreshing", "loading");
 
@@ -1076,10 +1272,10 @@ async function loadDashboard() {
     request("/api/dashboard", {
       method: "POST",
       body: JSON.stringify({
-        includeSummary: elements.includeSummary.checked,
-        focus: elements.focus.value.trim(),
-        parserFocus: elements.parserFocus.value.trim(),
-        parserTestchat: elements.parserTestchat.checked
+        includeSummary: requestControls.includeSummary,
+        focus: requestControls.focus.trim(),
+        parserFocus: requestControls.parserFocus.trim(),
+        parserTestchat: requestControls.parserTestchat
       })
     }),
     request("/api/health")
@@ -1099,12 +1295,102 @@ async function loadDashboard() {
   const dashboardPayload = dashboardResult.value;
 
   const { saveError } = await saveDashboardCache(dashboardPayload, healthPayload);
-  renderDashboard(dashboardPayload, healthPayload);
+  renderDashboard(dashboardPayload, healthPayload, {
+    controls: requestControls
+  });
   setStatus(
     saveError
       ? `Dashboard refreshed, but cache persistence is degraded: ${saveError}`
       : "Dashboard refreshed and saved for the next launch."
   );
+}
+
+function updateDiagnosticsCurlCommands(controls = readCurrentControls()) {
+  const diagnosticsControls = cloneControls(controls);
+
+  elements.healthCurl.textContent = buildHealthCurlCommand();
+  elements.parserCurl.textContent = buildParserCurlCommand(diagnosticsControls);
+  elements.snapshotCurl.textContent = buildSnapshotCurlCommand();
+  elements.dashboardCurl.textContent = buildDashboardCurlCommand(diagnosticsControls);
+}
+
+function buildHealthCurlCommand() {
+  return buildCurlCommand({
+    method: "GET",
+    path: "/api/health"
+  });
+}
+
+function buildParserCurlCommand(controls) {
+  return buildCurlCommand({
+    method: "POST",
+    path: "/api/portal/parse",
+    body: {
+      focus: controls.parserFocus.trim(),
+      testchat: controls.parserTestchat
+    }
+  });
+}
+
+function buildSnapshotCurlCommand() {
+  return buildCurlCommand({
+    method: "POST",
+    path: "/api/portal/preview",
+    body: {
+      includeSummary: false
+    }
+  });
+}
+
+function buildDashboardCurlCommand(controls) {
+  return buildCurlCommand({
+    method: "POST",
+    path: "/api/dashboard",
+    body: {
+      includeSummary: controls.includeSummary,
+      focus: controls.focus.trim(),
+      parserFocus: controls.parserFocus.trim(),
+      parserTestchat: controls.parserTestchat
+    }
+  });
+}
+
+function buildCurlCommand({ method, path, body }) {
+  const url = `${resolveApiBaseUrl()}${path}`;
+
+  if (method === "GET") {
+    return `curl -sS "${url}"`;
+  }
+
+  const rawBody = JSON.stringify(body, null, 2);
+  const escapedBody = escapeCurlBody(rawBody);
+
+  return [
+    `curl -sS -X ${method} "${url}" \\`,
+    '  -H "Content-Type: application/json" \\',
+    `  --data-raw '${escapedBody}'`
+  ].join("\n");
+}
+
+function resolveApiBaseUrl() {
+  if (window.location.protocol === "file:") {
+    return "http://127.0.0.1:3000";
+  }
+
+  return window.location.origin;
+}
+
+function escapeCurlBody(value) {
+  return String(value || "").replaceAll("'", "'\"'\"'");
+}
+
+function cloneControls(controls = {}) {
+  return {
+    includeSummary: controls.includeSummary === true,
+    parserTestchat: controls.parserTestchat === true,
+    focus: typeof controls.focus === "string" ? controls.focus : "",
+    parserFocus: typeof controls.parserFocus === "string" ? controls.parserFocus : ""
+  };
 }
 
 function renderDashboardError(message) {
@@ -1146,6 +1432,7 @@ elements.dashboardRefresh.addEventListener("click", () => {
 
 async function initializeApp() {
   applyDefaults();
+  updateDiagnosticsCurlCommands(readCurrentControls());
   await renderCachedDashboardOnStartup();
   setInterval(() => {
     refreshFreshnessIndicators();

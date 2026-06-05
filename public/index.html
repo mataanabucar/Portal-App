@@ -141,8 +141,8 @@
               <textarea
                 id="parser-focus-text"
                 rows="3"
-                placeholder="Example: extract the concrete asks, next actions, and urgency for each request."
-              >Extract each request into structured fields with requester, application, urgency, summary, next action, blockers, and due date.</textarea>
+                placeholder="Example: extract the main ask, deliverables, blockers, urgency, and next step for each request without guessing hidden values."
+              >For each visible request, extract the main ask, expected deliverable, blockers or missing information, urgency, and the clearest next step without guessing hidden values.</textarea>
             </label>
           </section>
         </div>
@@ -161,6 +161,8 @@
               <h3>Health</h3>
             </div>
             <pre id="health-output">Loading...</pre>
+            <p class="debug-call-label">curl</p>
+            <pre id="health-curl">Loading...</pre>
           </article>
 
           <article class="debug-card">
@@ -169,6 +171,8 @@
               <h3>Parser</h3>
             </div>
             <pre id="parser-output">No parser response yet.</pre>
+            <p class="debug-call-label">curl</p>
+            <pre id="parser-curl">No parser call yet.</pre>
           </article>
 
           <article class="debug-card debug-card-wide">
@@ -177,6 +181,8 @@
               <h3>Snapshot</h3>
             </div>
             <pre id="snapshot-output">No portal data loaded yet.</pre>
+            <p class="debug-call-label">curl</p>
+            <pre id="snapshot-curl">No snapshot call yet.</pre>
           </article>
 
           <article class="debug-card debug-card-wide">
@@ -185,6 +191,8 @@
               <h3>Status</h3>
             </div>
             <pre id="status-output">Ready.</pre>
+            <p class="debug-call-label">curl</p>
+            <pre id="dashboard-curl">No dashboard call yet.</pre>
           </article>
         </div>
       </details>
