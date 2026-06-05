@@ -18,12 +18,16 @@ import {
 } from "./services/testerConfig.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
+const lucideDirectory = fileURLToPath(
+  new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
+);
 
 export function createApp({ config, portalService, summarizer, parser, asker }) {
   const app = express();
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
+  app.use("/vendor/lucide", express.static(lucideDirectory));
   app.use(express.static(publicDirectory));
 
   app.get("/api/health", (request, response) => {

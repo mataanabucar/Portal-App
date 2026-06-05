@@ -159,6 +159,12 @@ async function runMockScenario() {
         dashboard.parser.request?.text?.format?.type === "json_schema"
     );
     console.log(
+      "Disabled parser fallback shape OK:",
+      Array.isArray(dashboard.parser.parsed?.items) &&
+        dashboard.parser.parsed.items.length === 0 &&
+        !Object.prototype.hasOwnProperty.call(dashboard.parser.parsed || {}, "overview")
+    );
+    console.log(
       "Dashboard record link retained:",
       dashboard.snapshot.records[0]?.id === "A-102" &&
         dashboard.snapshot.records[0]?.href ===
@@ -166,8 +172,8 @@ async function runMockScenario() {
     );
     console.log(
       "Parser response version OK:",
-      parser.parser.debug?.responseVersion === "2026-06-portal-parse-v2" &&
-        dashboard.parser.debug?.responseVersion === "2026-06-portal-parse-v2"
+      parser.parser.debug?.responseVersion === "2026-06-portal-parse-v3" &&
+        dashboard.parser.debug?.responseVersion === "2026-06-portal-parse-v3"
     );
     console.log(
       "OpenAI payload fields OK:",
@@ -231,16 +237,15 @@ async function runDashboardCachePersistenceScenario() {
           text: {
             format: {
               type: "json_schema",
-              name: "portal_visualizer_parse_v1",
+              name: "portal_visualizer_ai_summary_v1",
               strict: true,
               schema: {
                 type: "object",
                 additionalProperties: false,
                 properties: {
-                  overview: { type: "string" },
                   items: { type: "array", items: { type: "object" } }
                 },
-                required: ["overview", "items"]
+                required: ["items"]
               }
             }
           }
@@ -248,11 +253,49 @@ async function runDashboardCachePersistenceScenario() {
         parsed: {
           items: [
             {
-              id: "REQ-1",
               title: "Persist last dashboard state",
-              urgency: "high",
+              generatedAt: "2026-06-02T12:00:00.000Z",
+              status: {
+                label: "Needs investigation",
+                tone: "warning"
+              },
+              priority: {
+                label: "Normal Priority",
+                tone: "normal"
+              },
+              due: {
+                date: "11-Jun-26",
+                relative: "In 9 day(s)",
+                tone: "normal"
+              },
               nextAction: "Restore the saved dashboard cache on startup.",
-              blockers: []
+              summary: "Keep the current dashboard visible after relaunch.",
+              deliverable: "Persist the latest parsed request state for the next launch.",
+              blockersOpenQuestions: [],
+              urgency: "Saved dashboard cache should remain available after restart.",
+              keyDetails: [
+                { label: "Request ID", value: "226263" },
+                { label: "Related Action Item", value: "REQ-1" },
+                { label: "Requester", value: "Not visible" },
+                { label: "Application", value: "Portal Visualizer" },
+                { label: "Business / Customer", value: "Not visible" },
+                { label: "Request Type", value: "Not visible" },
+                { label: "Origin", value: "Not visible" },
+                { label: "Assigned Lead", value: "Not visible" },
+                { label: "Due Date", value: "11-Jun-26" },
+                { label: "Priority / Risk", value: "Normal / Not visible" },
+                { label: "Attachments", value: "Not visible" },
+                { label: "References / Fields", value: "dashboard cache" }
+              ],
+              requestHistorySignals: "No prior dashboard snapshot should be lost on restart.",
+              confidence: {
+                level: "High",
+                reason: "The cached dashboard payload already contains the needed queue state."
+              },
+              footer: {
+                requested: "02-Jun-2026 12:00",
+                lastUpdated: "02-Jun-2026 12:00"
+              }
             }
           ]
         }

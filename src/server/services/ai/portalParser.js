@@ -3,8 +3,9 @@ import OpenAI from "openai";
 import { createDisabledPortalParser } from "./disabledPortalParser.js";
 import { buildPortalParserInput } from "./portalParserInput.js";
 import { buildPortalParserRequest } from "./portalParserRequest.js";
+import { normalizePortalSummaryBatch } from "./portalSummaryNormalizer.js";
 
-const RESPONSE_VERSION = "2026-06-portal-parse-v2";
+const RESPONSE_VERSION = "2026-06-portal-parse-v3";
 
 export function createPortalParser(config) {
   if (!config.openAiEnabled || !config.openAiApiKey) {
@@ -37,6 +38,7 @@ export function createPortalParser(config) {
       const response = await client.responses.create(request, { maxRetries: 0 });
 
       assertCompleted(response);
+      const generatedAt = new Date().toISOString();
 
       return testchat
         ? {
@@ -63,7 +65,11 @@ export function createPortalParser(config) {
             reason: null,
             originalText,
             request,
-            parsed: parseStructuredOutput(response.output_text),
+            parsed: normalizePortalSummaryBatch(
+              parseStructuredOutput(response.output_text),
+              snapshot,
+              generatedAt
+            ),
             debug: buildDebugObject({
               requestId,
               model,

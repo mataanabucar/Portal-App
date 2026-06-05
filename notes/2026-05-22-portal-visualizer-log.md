@@ -86,3 +86,11 @@
 - Added smoke-test coverage for an auto-post outer-page redirect that resolves into the existing `todolist` iframe flow before linked-detail extraction.
 - Fixed the cookie-refresh fallback so non-OK auth broker pages, including the current `400` `Sign in to benchmarkteam` HTML returned during the redirect-form POST, are normalized into the same sign-in error path that triggers automatic browser-based cookie renewal.
 - Added a stale-cookie smoke-test regression that seeds an expired cache, forces the redirect-form POST to hit a benchmarkteam sign-in page, and verifies `cookie-html` automatically recovers by refreshing cookies through the browser path and then reloading the request iframe successfully.
+
+## 2026-06-05
+
+- Replaced the old parsed queue-card contract with a richer AI-summary batch schema and prompt so each request now returns `title`, `status`, `priority`, `due`, `nextAction`, `summary`, `deliverable`, `blockersOpenQuestions`, `urgency`, `keyDetails`, `requestHistorySignals`, `confidence`, and `footer` while preserving queue order.
+- Added a parser normalization layer that stamps a real `generatedAt` time, enforces the fixed Key Details label set, backfills missing values with `Not visible`, and keeps disabled-parser responses on a clean `{ items: [] }` fallback shape.
+- Imported Lucide locally from `node_modules` through the app server and rebuilt the queue renderer into expandable AI Summary triage cards with Lucide status/detail icons, compact due/status/priority pills, key-details panels, history and confidence cards, and a full-request footer link.
+- Retired the separate top-priority spotlight in the visible UI, kept the shared queue regenerate button, and preserved the simpler snapshot-card fallback when the parser is disabled, malformed, or in testchat mode.
+- Updated smoke-test fixtures and cache-persistence fixtures for the new parser schema/version, and verified the redesigned UI locally by seeding a temporary cached dashboard, loading the live app, expanding the first AI Summary card, and confirming Lucide SVG icons rendered in the browser.

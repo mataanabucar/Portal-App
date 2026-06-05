@@ -1,7 +1,7 @@
 import { buildPortalParserInput } from "./portalParserInput.js";
 import { buildPortalParserRequest } from "./portalParserRequest.js";
 
-const RESPONSE_VERSION = "2026-06-portal-parse-v2";
+const RESPONSE_VERSION = "2026-06-portal-parse-v3";
 
 export function createDisabledPortalParser(config) {
   const reason = config.openAiApiKey
@@ -49,11 +49,7 @@ export function createDisabledPortalParser(config) {
             reason,
             originalText,
             request,
-            parsed: {
-              overview:
-                "Portal parser is disabled. Enable OPENAI_ENABLED=true and set OPENAI_API_KEY to receive structured portal parsing.",
-              items: []
-            },
+            parsed: { items: [] },
             debug: buildDebugObject(config, "structured")
           };
     }

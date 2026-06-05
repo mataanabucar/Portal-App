@@ -1,65 +1,137 @@
+import { KEY_DETAIL_LABELS } from "./portalSummaryNormalizer.js";
+
+const KEY_DETAIL_ROWS_SCHEMA = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      label: { type: "string" },
+      value: { type: "string" }
+    },
+    required: ["label", "value"]
+  }
+};
+
 const RESPONSE_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    overview: { type: "string" },
     items: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          id: { type: "string" },
           title: { type: "string" },
-          requester: { type: "string" },
-          application: { type: "string" },
-          owner: { type: "string" },
-          dueDate: { type: "string" },
-          urgency: {
-            type: "string",
-            enum: ["low", "normal", "high", "critical"]
+          generatedAt: { type: "string" },
+          status: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              label: { type: "string" },
+              tone: {
+                type: "string",
+                enum: ["blocked", "warning", "active", "ready", "neutral"]
+              }
+            },
+            required: ["label", "tone"]
           },
-          summary: { type: "string" },
+          priority: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              label: { type: "string" },
+              tone: {
+                type: "string",
+                enum: ["normal", "high", "low", "unknown"]
+              }
+            },
+            required: ["label", "tone"]
+          },
+          due: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              date: { type: "string" },
+              relative: { type: "string" },
+              tone: {
+                type: "string",
+                enum: ["normal", "soon", "overdue", "unknown"]
+              }
+            },
+            required: ["date", "relative", "tone"]
+          },
           nextAction: { type: "string" },
-          blockers: {
+          summary: { type: "string" },
+          deliverable: { type: "string" },
+          blockersOpenQuestions: {
             type: "array",
             items: { type: "string" }
           },
-          confidence: { type: "number" }
+          urgency: { type: "string" },
+          keyDetails: KEY_DETAIL_ROWS_SCHEMA,
+          requestHistorySignals: { type: "string" },
+          confidence: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              level: {
+                type: "string",
+                enum: ["High", "Medium", "Low"]
+              },
+              reason: { type: "string" }
+            },
+            required: ["level", "reason"]
+          },
+          footer: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              requested: { type: "string" },
+              lastUpdated: { type: "string" }
+            },
+            required: ["requested", "lastUpdated"]
+          }
         },
         required: [
-          "id",
           "title",
-          "requester",
-          "application",
-          "owner",
-          "dueDate",
-          "urgency",
-          "summary",
+          "generatedAt",
+          "status",
+          "priority",
+          "due",
           "nextAction",
-          "blockers",
-          "confidence"
+          "summary",
+          "deliverable",
+          "blockersOpenQuestions",
+          "urgency",
+          "keyDetails",
+          "requestHistorySignals",
+          "confidence",
+          "footer"
         ]
       }
     }
   },
-  required: ["overview", "items"]
+  required: ["items"]
 };
 
 const SYSTEM_PROMPT = [
-  "You review internal portal request data for a single user.",
-  "Return only JSON that matches the provided schema.",
-  "Create exactly one item for each visible request record in the same order as the input records.",
-  "Use only information visible in the provided portal data.",
-  "Do not guess values that are hidden, unavailable, or not present.",
-  "If a field is unknown, return an empty string.",
-  "Do not invent request IDs, titles, owners, or dates when they are not visible.",
-  "Write overview as a short queue-level brief that highlights the most urgent work and common blockers.",
-  "Write each summary as a concise factual description of the main ask, expected deliverable, and any relevant business or request-history context.",
-  "Write nextAction as one short practical sentence for the assigned lead.",
-  "Keep blockers limited to explicit blockers, dependencies, or missing information visible in the record.",
-  "Set urgency only from visible due dates, request wording, risk language, and visible blockers.",
-  "Lower confidence when key details are missing, unclear, or only weakly implied."
+  "You are an AI analyst reviewing internal customer request pages from a support and action portal.",
+  "The input contains one or more extracted portal records.",
+  "Create exactly one response item for each visible request record in the same order as the input records.",
+  "Use only the provided page content.",
+  "Do not invent missing values, internal behavior, root causes, or recommendations not supported by the page.",
+  "Avoid repeating the same information across sections.",
+  "Keep wording operational, concise, and useful for support triage.",
+  "The title must be a concise case title, not a sentence, and must not start with the requester's name.",
+  "Preserve important exact terms such as system names, report names, reference values, IDs, and field names.",
+  "Use request history only when it adds new context, blockers, or investigation progress.",
+  "Identify urgency only from visible evidence such as due date, request age, priority, SLA warnings, elapsed-time messages, status, or queue indicators.",
+  "If something is unclear or missing, say so briefly.",
+  `Return valid JSON only. For each item, include keyDetails using this fixed label set in this exact order: ${KEY_DETAIL_LABELS.join(", ")}.`,
+  'If a key detail value is unavailable, use "Not visible".',
+  "If generatedAt is not visible in the portal data, leave it as an empty string because the application will stamp the real generation time."
 ].join(" ");
 
 export function buildPortalParserRequest({ model, originalText, testchat, focus }) {
@@ -80,7 +152,7 @@ export function buildPortalParserRequest({ model, originalText, testchat, focus 
         text: {
           format: {
             type: "json_schema",
-            name: "portal_visualizer_parse_v1",
+            name: "portal_visualizer_ai_summary_v1",
             strict: true,
             schema: RESPONSE_SCHEMA
           }
@@ -90,14 +162,14 @@ export function buildPortalParserRequest({ model, originalText, testchat, focus 
 
 export function buildPortalParserInstructions({ testchat, focus }) {
   const focusLine = normalizeFocus(focus)
-    ? `Focus especially on this request: ${normalizeFocus(focus)}.`
-    : "Focus on the most urgent, actionable, and blocked work.";
+    ? `Focus especially on this request context: ${normalizeFocus(focus)}.`
+    : "Focus on the most urgent, blocked, and actionable work.";
 
   return testchat
     ? [
         "You review internal portal request data for a single user.",
         "Return a concise plain-text analysis.",
-        "Call out asks, deliverables, blockers, and urgency.",
+        "Call out asks, deliverables, blockers, urgency, and the clearest next step.",
         focusLine
       ].join(" ")
     : [SYSTEM_PROMPT, focusLine].join(" ");

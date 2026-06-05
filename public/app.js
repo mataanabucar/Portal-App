@@ -1,3 +1,54 @@
+import {
+  ArrowRight,
+  BadgeCheck,
+  Bot,
+  Building2,
+  CalendarDays,
+  ChevronDown,
+  Clock3,
+  ExternalLink,
+  FileText,
+  Flag,
+  Globe,
+  Hash,
+  History,
+  Info,
+  Link2,
+  Monitor,
+  Paperclip,
+  ShieldAlert,
+  Sparkles,
+  Tags,
+  TriangleAlert,
+  User,
+  createIcons
+} from "/vendor/lucide/lucide.mjs";
+
+const lucideIcons = {
+  ArrowRight,
+  BadgeCheck,
+  Bot,
+  Building2,
+  CalendarDays,
+  ChevronDown,
+  Clock3,
+  ExternalLink,
+  FileText,
+  Flag,
+  Globe,
+  Hash,
+  History,
+  Info,
+  Link2,
+  Monitor,
+  Paperclip,
+  ShieldAlert,
+  Sparkles,
+  Tags,
+  TriangleAlert,
+  User
+};
+
 const elements = {
   boardMeta: document.querySelector("#board-meta"),
   dashboardRefresh: document.querySelector("#refresh-dashboard"),
@@ -38,6 +89,21 @@ const defaultValues = {
   parserFocus:
     "For each visible request, extract the main ask, expected deliverable, blockers or missing information, urgency, and the clearest next step without guessing hidden values."
 };
+
+const KEY_DETAIL_LABELS = [
+  "Request ID",
+  "Related Action Item",
+  "Requester",
+  "Application",
+  "Business / Customer",
+  "Request Type",
+  "Origin",
+  "Assigned Lead",
+  "Due Date",
+  "Priority / Risk",
+  "Attachments",
+  "References / Fields"
+];
 
 let currentViewState = null;
 
@@ -174,7 +240,6 @@ function renderDashboard(payload, healthPayload, options = {}) {
   }
   elements.heroLede.textContent = buildHeroLede(todoItems, payload.summary, payload.parser);
 
-  renderPrioritySpotlight(todoItems, payload.parser);
   renderTodoBoard(todoItems, payload.parser);
   updateDiagnosticsCurlCommands(diagnosticsControls);
   refreshFreshnessIndicators();
@@ -188,52 +253,101 @@ function buildTodoItems(payload) {
   if (
     payload.parser?.mode === "structured" &&
     Array.isArray(payload.parser?.parsed?.items) &&
+    payload.parser.parsed.items.length === snapshotRecords.length &&
     payload.parser.parsed.items.length > 0
   ) {
-    return buildStructuredTodoItems(payload.parser.parsed.items, snapshotRecords)
-      .sort(compareTodoItems);
+    return buildStructuredTodoItems(payload.parser.parsed.items, snapshotRecords);
   }
 
-  return snapshotRecords.map((record) => normalizeSnapshotTodo(record)).sort(compareTodoItems);
+  return snapshotRecords.map((record) => normalizeSnapshotTodo(record));
 }
 
 function buildStructuredTodoItems(parsedItems, snapshotRecords) {
   if (snapshotRecords.length === 0) {
-    return parsedItems.map((item) => normalizeParsedTodo(item));
+    return parsedItems.map((item, index) => normalizeParsedTodo(item, null, index));
   }
 
   return snapshotRecords.map((record, index) =>
-    normalizeParsedTodo(parsedItems[index], record)
+    normalizeParsedTodo(parsedItems[index], record, index)
   );
 }
 
-function normalizeParsedTodo(item = {}, snapshotRecord = null) {
+function normalizeParsedTodo(item = {}, snapshotRecord = null, index = 0) {
   const snapshotTodo = snapshotRecord ? normalizeSnapshotTodo(snapshotRecord) : null;
-  const parsedBlockers = normalizeBlockers(item.blockers);
+  const parsedBlockers = normalizeBlockers(item.blockersOpenQuestions);
   const fallbackBlockers = snapshotTodo?.blockers || [];
-  const hasParsedContent =
-    item && typeof item === "object" && Object.keys(item).length > 0;
+  const dueDate =
+    item?.due?.date ||
+    readKeyDetailValue(item?.keyDetails, "Due Date") ||
+    snapshotTodo?.dueDate ||
+    "";
+  const application =
+    readKeyDetailValue(item?.keyDetails, "Application") ||
+    snapshotTodo?.application ||
+    "";
+  const requester =
+    readKeyDetailValue(item?.keyDetails, "Requester") ||
+    snapshotTodo?.requester ||
+    "";
+  const owner =
+    readKeyDetailValue(item?.keyDetails, "Assigned Lead") ||
+    snapshotTodo?.owner ||
+    "";
+  const hasParsedContent = item && typeof item === "object" && Object.keys(item).length > 0;
 
   return {
-    id: snapshotTodo?.id || item.id || "",
+    cardKind: "ai-summary",
+    index,
+    id:
+      snapshotTodo?.id ||
+      readKeyDetailValue(item?.keyDetails, "Related Action Item") ||
+      readKeyDetailValue(item?.keyDetails, "Request ID") ||
+      "",
     href: snapshotRecord?.href || snapshotTodo?.href || "",
     title: resolveDisplayTitle({
       parsedTitle: item.title,
       parsedSummary: item.summary,
       snapshotTitle: snapshotTodo?.title
     }),
-    urgency: normalizeUrgency(item.urgency || snapshotTodo?.urgency),
+    urgency: inferAiSummaryUrgency(item, dueDate, snapshotTodo?.urgency),
+    dueDate,
+    requester,
+    application,
+    owner,
     nextAction:
-      item.nextAction ||
+      normalizeText(item.nextAction) ||
       snapshotTodo?.nextAction ||
       "Review this request and determine the next step.",
-    summary: item.summary || snapshotTodo?.summary || "",
-    dueDate: item.dueDate || snapshotTodo?.dueDate || "",
-    requester: item.requester || snapshotTodo?.requester || "",
-    application: item.application || snapshotTodo?.application || "",
-    owner: item.owner || snapshotTodo?.owner || "",
+    summary: normalizeText(item.summary) || snapshotTodo?.summary || "",
     blockers: parsedBlockers.length > 0 ? parsedBlockers : fallbackBlockers,
-    confidence: Number.isFinite(item.confidence) ? item.confidence : null,
+    generatedAt: normalizeText(item.generatedAt),
+    status: {
+      label: normalizeText(item?.status?.label),
+      tone: normalizeAiStatusTone(item?.status?.tone)
+    },
+    priority: {
+      label: normalizeText(item?.priority?.label),
+      tone: normalizeAiPriorityTone(item?.priority?.tone)
+    },
+    due: {
+      date: dueDate,
+      relative:
+        normalizeText(item?.due?.relative) || formatDueDateDistanceLabel(dueDate),
+      tone: normalizeAiDueTone(item?.due?.tone, dueDate)
+    },
+    deliverable: normalizeText(item.deliverable),
+    blockersOpenQuestions: parsedBlockers.length > 0 ? parsedBlockers : fallbackBlockers,
+    urgencyText: normalizeText(item.urgency),
+    keyDetails: normalizeKeyDetails(item.keyDetails, snapshotRecord, snapshotTodo, dueDate),
+    requestHistorySignals: normalizeText(item.requestHistorySignals),
+    confidence: {
+      level: normalizeAiConfidenceLevel(item?.confidence?.level),
+      reason: normalizeText(item?.confidence?.reason)
+    },
+    footer: {
+      requested: normalizeText(item?.footer?.requested),
+      lastUpdated: normalizeText(item?.footer?.lastUpdated)
+    },
     source: hasParsedContent ? "parsed" : "snapshot"
   };
 }
@@ -242,6 +356,7 @@ function normalizeSnapshotTodo(record) {
   const fallbackDueDate = extractDueDateFromRecord(record);
 
   return {
+    cardKind: "snapshot",
     id: record.id || "",
     href: record.href || "",
     title: record.title || "Untitled request",
@@ -262,8 +377,227 @@ function normalizeSnapshotTodo(record) {
 
 function normalizeBlockers(value) {
   return Array.isArray(value)
-    ? value.filter((blocker) => typeof blocker === "string" && blocker.trim())
+    ? Array.from(
+        new Set(
+          value
+            .map((blocker) => normalizeText(blocker))
+            .filter(Boolean)
+        )
+      )
     : [];
+}
+
+function normalizeKeyDetails(value, snapshotRecord, snapshotTodo, dueDate) {
+  const incomingValues = new Map();
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const label = normalizeText(entry?.label);
+
+      if (!KEY_DETAIL_LABELS.includes(label) || incomingValues.has(label)) {
+        continue;
+      }
+
+      incomingValues.set(label, normalizeIncomingKeyDetailValue(entry?.value));
+    }
+  }
+
+  return KEY_DETAIL_LABELS.map((label) => ({
+    label,
+    value:
+      incomingValues.get(label) ||
+      readSnapshotKeyDetailValue(label, snapshotRecord, snapshotTodo, dueDate) ||
+      "Not visible"
+  }));
+}
+
+function normalizeIncomingKeyDetailValue(value) {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  return normalizedValue.toLowerCase() === "not visible" ? "" : normalizedValue;
+}
+
+function readSnapshotKeyDetailValue(label, snapshotRecord = {}, snapshotTodo = {}, dueDate = "") {
+  const detailPageContent = normalizeText(snapshotRecord?.detailPageContent);
+  const requestId =
+    extractRequestIdFromText(detailPageContent || snapshotRecord?.title || "") ||
+    extractRequestIdFromText(snapshotTodo?.title || "");
+  const priorityRisk = buildPriorityRiskFallback(snapshotRecord);
+
+  if (label === "Request ID") {
+    return requestId;
+  }
+
+  if (label === "Related Action Item") {
+    return normalizeText(snapshotRecord?.issueItem || snapshotTodo?.id);
+  }
+
+  if (label === "Requester") {
+    return normalizeText(snapshotTodo?.requester);
+  }
+
+  if (label === "Application") {
+    return normalizeText(snapshotRecord?.application || snapshotTodo?.application);
+  }
+
+  if (label === "Business / Customer") {
+    return normalizeText(snapshotRecord?.business);
+  }
+
+  if (label === "Request Type") {
+    return extractPortalLabeledValue(detailPageContent, "Request Type", [
+      "Request Origin",
+      "Application",
+      "Business"
+    ]);
+  }
+
+  if (label === "Origin") {
+    return extractPortalLabeledValue(detailPageContent, "Request Origin", [
+      "Response Type",
+      "Application",
+      "Business"
+    ]);
+  }
+
+  if (label === "Assigned Lead") {
+    return normalizeText(snapshotRecord?.owner || snapshotTodo?.owner);
+  }
+
+  if (label === "Due Date") {
+    return normalizeText(dueDate || snapshotRecord?.dueDate || snapshotTodo?.dueDate);
+  }
+
+  if (label === "Priority / Risk") {
+    return priorityRisk;
+  }
+
+  return "";
+}
+
+function readKeyDetailValue(keyDetails, label) {
+  const entry = Array.isArray(keyDetails)
+    ? keyDetails.find((item) => item?.label === label)
+    : null;
+
+  return normalizeIncomingKeyDetailValue(entry?.value);
+}
+
+function buildPriorityRiskFallback(record = {}) {
+  const priority = normalizeText(record?.priority);
+  const riskLevel = extractPortalLabeledValue(
+    normalizeText(record?.detailPageContent),
+    "Risk Level",
+    ["Request Origin", "Response Type", "Application"]
+  );
+
+  if (priority && riskLevel) {
+    return `${priority} / ${riskLevel}`;
+  }
+
+  return priority || riskLevel;
+}
+
+function extractRequestIdFromText(value) {
+  const normalizedValue = normalizeText(value);
+  const hashMatch = normalizedValue.match(/#(\d{4,})/);
+
+  if (hashMatch?.[1]) {
+    return hashMatch[1];
+  }
+
+  const requestMatch = normalizedValue.match(/\bRequest ID\s+(\d{4,})/i);
+  return requestMatch?.[1] || "";
+}
+
+function extractPortalLabeledValue(value, label, nextLabels) {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const safeLabel = escapeRegex(label);
+  const safeNextLabels = Array.isArray(nextLabels)
+    ? nextLabels.map((entry) => escapeRegex(entry)).join("|")
+    : "";
+  const pattern = safeNextLabels
+    ? new RegExp(`${safeLabel}\\s+(.+?)(?=\\s+(?:${safeNextLabels})\\b|$)`, "i")
+    : new RegExp(`${safeLabel}\\s+(.+)$`, "i");
+
+  return normalizeText(normalizedValue.match(pattern)?.[1]);
+}
+
+function normalizeAiStatusTone(value) {
+  const normalizedValue = normalizeText(value).toLowerCase();
+  return ["blocked", "warning", "active", "ready", "neutral"].includes(normalizedValue)
+    ? normalizedValue
+    : "neutral";
+}
+
+function normalizeAiPriorityTone(value) {
+  const normalizedValue = normalizeText(value).toLowerCase();
+  return ["normal", "high", "low", "unknown"].includes(normalizedValue)
+    ? normalizedValue
+    : "unknown";
+}
+
+function normalizeAiDueTone(value, dueDate) {
+  const normalizedValue = normalizeText(value).toLowerCase();
+
+  if (["normal", "soon", "overdue", "unknown"].includes(normalizedValue)) {
+    return normalizedValue;
+  }
+
+  const dayDifference = getDueDateDayDifference(dueDate);
+
+  if (dayDifference === null) {
+    return "unknown";
+  }
+
+  if (dayDifference <= 0) {
+    return "overdue";
+  }
+
+  if (dayDifference <= 7) {
+    return "soon";
+  }
+
+  return "normal";
+}
+
+function normalizeAiConfidenceLevel(value) {
+  const normalizedValue = normalizeText(value);
+  return ["High", "Medium", "Low"].includes(normalizedValue) ? normalizedValue : "";
+}
+
+function inferAiSummaryUrgency(item, dueDate, fallbackUrgency) {
+  const dueTone = normalizeAiDueTone(item?.due?.tone, dueDate);
+  const priorityTone = normalizeAiPriorityTone(item?.priority?.tone);
+  const statusTone = normalizeAiStatusTone(item?.status?.tone);
+
+  if (dueTone === "overdue") {
+    return "critical";
+  }
+
+  if (
+    dueTone === "soon" ||
+    priorityTone === "high" ||
+    statusTone === "blocked" ||
+    normalizeBlockers(item?.blockersOpenQuestions).length > 0
+  ) {
+    return "high";
+  }
+
+  if (priorityTone === "low") {
+    return "low";
+  }
+
+  return normalizeUrgency(fallbackUrgency);
 }
 
 function resolveDisplayTitle({ parsedTitle, parsedSummary, snapshotTitle }) {
@@ -311,54 +645,8 @@ function isGenericPortalTitle(value) {
 }
 
 function renderPrioritySpotlight(items, parser) {
-  if (items.length === 0) {
-    elements.prioritySpotlight.dataset.urgency = "normal";
-    elements.prioritySpotlight.innerHTML = `
-      <p class="section-kicker">Do This First</p>
-      <h2>No active priority yet</h2>
-      <p class="priority-next">${
-        parser.mode === "testchat"
-          ? "Snapshot cards are available, but structured parser guidance is reduced while test chat mode is active."
-          : "When portal items are returned, the first move will land here as a quick priority note."
-      }</p>
-      <p class="priority-support">Refresh the queue or review diagnostics if the result looks incomplete.</p>
-    `;
-    return;
-  }
-
-  const leadItem = items[0];
-  const blockerPreview = leadItem.blockers[0]
-    ? clipText(leadItem.blockers[0], 120)
-    : "";
-
-  elements.prioritySpotlight.dataset.urgency = leadItem.urgency;
-  elements.prioritySpotlight.innerHTML = `
-    <div class="priority-top">
-      <div>
-        <p class="section-kicker">Do This First</p>
-        <h2>${escapeHtml(leadItem.title)}</h2>
-      </div>
-      <div class="priority-badges">
-        ${buildDueBadge(leadItem)}
-        <span class="urgency-badge" data-urgency="${escapeHtml(leadItem.urgency)}">${escapeHtml(formatUrgencyLabel(leadItem.urgency))}</span>
-      </div>
-    </div>
-    <p class="todo-next-label">Start with</p>
-    <p class="priority-next">${escapeHtml(leadItem.nextAction)}</p>
-    <p class="priority-support">${escapeHtml(buildPriorityReason(leadItem))}</p>
-    <div class="todo-chip-row">
-      ${buildMetaChips(leadItem)}
-    </div>
-    ${
-      blockerPreview
-        ? `<p class="priority-blocker-inline">${escapeHtml(blockerPreview)}</p>`
-        : ""
-    }
-    <div class="priority-footer">
-      ${buildTaskActions(leadItem, 0, "priority-actions")}
-      <p class="priority-footer-note">${escapeHtml(buildPriorityFooterNote(leadItem))}</p>
-    </div>
-  `;
+  void items;
+  void parser;
 }
 
 function renderTodoBoard(items, parser) {
@@ -373,68 +661,497 @@ function renderTodoBoard(items, parser) {
         }</p>
       </article>
     `;
+    renderLucideIcons(elements.todoBoard);
     return;
   }
 
   elements.todoBoard.innerHTML = items
-    .map((item, index) => {
-      const summaryParts = splitLongText(
-        item.summary || "No summary was extracted for this item.",
-        200
-      );
-      const blockersMarkup = buildBlockerCallout(item.blockers);
-      const detailsMarkup = summaryParts.full
-        ? `
-          <details class="todo-details">
-            <summary>More context</summary>
-            <p>${escapeHtml(summaryParts.full)}</p>
-          </details>
-        `
-        : "";
-      const confidenceText =
-        typeof item.confidence === "number"
-          ? `Confidence ${Math.round(item.confidence * 100)}%`
-          : item.source === "snapshot"
-            ? "Portal snapshot fallback"
-            : "Confidence not available";
-
-      return `
-        <article class="todo-card dashboard-sheen-card ${index === 0 ? "is-leading" : ""}" data-urgency="${escapeHtml(item.urgency)}">
-          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
-          <div class="todo-card-top">
-            <span class="todo-rank">${escapeHtml(index === 0 ? "Up next" : "In queue")}</span>
-            <div class="todo-card-header">
-              ${buildDueBadge(item)}
-              <span class="urgency-badge" data-urgency="${escapeHtml(item.urgency)}">${escapeHtml(formatUrgencyLabel(item.urgency))}</span>
-            </div>
-          </div>
-          <h3>${escapeHtml(item.title)}</h3>
-          <p class="todo-next-label">Next action</p>
-          <p class="todo-next">${escapeHtml(item.nextAction)}</p>
-          <p class="todo-summary">${escapeHtml(summaryParts.preview)}</p>
-          <div class="todo-chip-row">
-            ${buildMetaChips(item)}
-          </div>
-          ${blockersMarkup}
-          ${detailsMarkup}
-          <div class="todo-footer">
-            ${buildTaskActions(item, index, "todo-footer-actions")}
-            <div class="todo-footer-meta">
-              <p class="todo-confidence">${escapeHtml(confidenceText)}</p>
-              ${buildFooterStatusMarkup(item)}
-            </div>
-          </div>
-        </article>
-      `;
-    })
+    .map((item, index) =>
+      item.cardKind === "ai-summary"
+        ? buildAiSummaryCard(item, index)
+        : buildSnapshotTodoCard(item, index)
+    )
     .join("");
+
+  renderLucideIcons(elements.todoBoard);
 }
 
-function buildTaskActions(item, index, className) {
+function buildAiSummaryCard(item, index) {
+  const expandedId = buildAiSummaryExpandedId(item, index);
+  const sections = buildAiSummarySections(item);
+
+  return `
+    <article
+      class="todo-card ai-summary-card ${index === 0 ? "is-leading" : ""}"
+      data-ai-card
+      data-expanded="false"
+      data-urgency="${escapeHtml(item.urgency)}"
+    >
+      <header class="ai-summary-card__header">
+        <div class="ai-summary-card__brand">
+          <span class="ai-summary-card__brand-mark" data-lucide="sparkles"></span>
+          <div>
+            <p class="ai-summary-card__brand-label">AI Summary</p>
+            <p class="ai-summary-card__brand-note">Generated summary of this customer request</p>
+          </div>
+        </div>
+        <div class="ai-summary-card__header-meta">
+          <p class="ai-summary-card__generated">
+            <span class="ai-summary-card__generated-icon" data-lucide="clock-3"></span>
+            <span>${escapeHtml(formatGeneratedAtLabel(item.generatedAt))}</span>
+          </p>
+          <button
+            class="ai-summary-card__toggle"
+            type="button"
+            data-ai-toggle
+            aria-expanded="false"
+            aria-controls="${escapeHtml(expandedId)}"
+          >
+            <span>Expand</span>
+            <span class="ai-summary-card__toggle-icon" data-lucide="chevron-down"></span>
+          </button>
+        </div>
+      </header>
+      <section class="ai-summary-card__title-panel">
+        <div class="ai-summary-card__title-icon">
+          <span data-lucide="bot"></span>
+        </div>
+        <div class="ai-summary-card__title-copy">
+          <p class="ai-summary-card__eyebrow">${escapeHtml(index === 0 ? "Up next" : "In queue")}</p>
+          <h3>${escapeHtml(item.title)}</h3>
+          <div class="ai-summary-card__pill-row">
+            ${buildAiStatusPill(item.status)}
+            ${buildAiPriorityPill(item.priority)}
+            ${buildAiDuePill(item)}
+          </div>
+          <div class="ai-summary-card__collapsed-preview">
+            <div class="ai-summary-card__preview-line">
+              <p class="ai-summary-card__preview-label">Next action</p>
+              <p class="ai-summary-card__preview-text">${escapeHtml(item.nextAction)}</p>
+            </div>
+            ${buildAiSummaryBlockerPreview(item.blockersOpenQuestions)}
+          </div>
+        </div>
+      </section>
+      <div class="ai-summary-card__expanded" id="${escapeHtml(expandedId)}" hidden>
+        <div class="ai-summary-card__expanded-grid">
+          <div class="ai-summary-card__left">
+            ${sections.left.join("")}
+          </div>
+          <div class="ai-summary-card__right">
+            ${buildAiKeyDetailsPanel(item.keyDetails)}
+            ${sections.right.join("")}
+          </div>
+        </div>
+        ${buildAiSummaryFooter(item, index)}
+      </div>
+    </article>
+  `;
+}
+
+function buildAiSummaryExpandedId(item, index) {
+  const safeId = normalizeText(item.id || `task-${index + 1}`)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `ai-summary-${safeId || index + 1}`;
+}
+
+function buildAiStatusPill(status) {
+  const label = normalizeText(status?.label);
+
+  if (!label) {
+    return "";
+  }
+
+  return `
+    <span class="ai-status-pill" data-tone="${escapeHtml(status.tone || "neutral")}">
+      ${status.tone === "blocked" ? '<span data-lucide="triangle-alert"></span>' : ""}
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
+function buildAiPriorityPill(priority) {
+  const label = normalizeText(priority?.label);
+
+  if (!label) {
+    return "";
+  }
+
+  return `
+    <span class="ai-status-pill ai-status-pill--priority" data-tone="${escapeHtml(
+      priority.tone || "unknown"
+    )}">
+      <span>${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
+function buildAiDuePill(item) {
+  const dueDateValue = item?.due?.date || item?.dueDate;
+  const dueDateLabel = formatDueDateBadgeLabel(dueDateValue);
+
+  if (!dueDateLabel) {
+    return "";
+  }
+
+  const dueState = getDueDateState(dueDateValue);
+  const dueUrgency = resolveDueBadgeUrgency(dueDateValue, item?.urgency);
+  const relativeLabel =
+    normalizeText(item?.due?.relative) || formatDueDateDistanceLabel(dueDateValue);
+
+  return `
+    <span class="due-badge urgency-badge${dueState === "today" ? " is-due-today" : ""}" data-urgency="${escapeHtml(
+      dueUrgency
+    )}" data-due-state="${escapeHtml(dueState)}">
+      <span class="due-badge__date">Due: ${escapeHtml(dueDateLabel)}</span>
+      <span class="due-badge__distance">${escapeHtml(relativeLabel)}</span>
+    </span>
+  `;
+}
+
+function buildAiSummaryBlockerPreview(blockers) {
+  if (!Array.isArray(blockers) || blockers.length === 0) {
+    return "";
+  }
+
+  return `
+    <div class="ai-summary-card__blocker-preview">
+      <p class="ai-summary-card__preview-label">Blockers</p>
+      <p class="ai-summary-card__preview-text">${escapeHtml(
+        clipText(blockers.join(" "), 160)
+      )}</p>
+    </div>
+  `;
+}
+
+function buildAiSummarySections(item) {
+  const distinctText = [];
+  const left = [];
+  const right = [];
+
+  left.push(
+    buildAiSummarySection({
+      kind: "next-action",
+      label: "Next Action",
+      icon: "arrow-right",
+      body: item.nextAction
+    })
+  );
+  trackDistinctText(distinctText, item.nextAction);
+
+  const summaryText = getDistinctText(item.summary, distinctText);
+
+  if (summaryText) {
+    left.push(
+      buildAiSummarySection({
+        kind: "summary",
+        label: "Summary",
+        icon: "file-text",
+        body: summaryText
+      })
+    );
+    trackDistinctText(distinctText, summaryText);
+  }
+
+  const deliverableText = getDistinctText(item.deliverable, distinctText);
+
+  if (deliverableText) {
+    left.push(
+      buildAiSummarySection({
+        kind: "deliverable",
+        label: "Deliverable",
+        icon: "badge-check",
+        body: deliverableText
+      })
+    );
+    trackDistinctText(distinctText, deliverableText);
+  }
+
+  if (Array.isArray(item.blockersOpenQuestions) && item.blockersOpenQuestions.length > 0) {
+    left.push(buildAiBlockersSection(item.blockersOpenQuestions));
+    item.blockersOpenQuestions.forEach((entry) => trackDistinctText(distinctText, entry));
+  }
+
+  const urgencyText = getDistinctText(item.urgencyText, distinctText);
+
+  if (urgencyText) {
+    left.push(
+      buildAiSummarySection({
+        kind: "urgency",
+        label: "Urgency",
+        icon: "clock-3",
+        body: urgencyText
+      })
+    );
+  }
+
+  const historyText = getDistinctText(item.requestHistorySignals, distinctText);
+
+  if (historyText) {
+    right.push(
+      buildAiSummarySection({
+        kind: "history",
+        label: "Request History Signals",
+        icon: "history",
+        body: historyText,
+        compact: true
+      })
+    );
+  }
+
+  const confidenceMarkup = buildAiConfidencePanel(item.confidence);
+
+  if (confidenceMarkup) {
+    right.push(confidenceMarkup);
+  }
+
+  return { left, right };
+}
+
+function buildAiSummarySection({ kind, label, icon, body, compact = false }) {
+  const normalizedBody = normalizeText(body);
+
+  if (!normalizedBody) {
+    return "";
+  }
+
+  return `
+    <section class="ai-summary-section ai-summary-section--${escapeHtml(
+      kind
+    )}${compact ? " is-compact" : ""}">
+      <div class="ai-summary-section__icon">
+        <span data-lucide="${escapeHtml(icon)}"></span>
+      </div>
+      <div class="ai-summary-section__copy">
+        <p class="ai-summary-section__label">${escapeHtml(label)}</p>
+        <p class="ai-summary-section__body">${escapeHtml(normalizedBody)}</p>
+      </div>
+    </section>
+  `;
+}
+
+function buildAiBlockersSection(blockers) {
+  return `
+    <section class="ai-summary-section ai-summary-section--blockers">
+      <div class="ai-summary-section__icon">
+        <span data-lucide="triangle-alert"></span>
+      </div>
+      <div class="ai-summary-section__copy">
+        <p class="ai-summary-section__label">Blockers / Open Questions</p>
+        <ul class="ai-summary-list">
+          ${blockers.map((blocker) => `<li>${escapeHtml(blocker)}</li>`).join("")}
+        </ul>
+      </div>
+    </section>
+  `;
+}
+
+function buildAiKeyDetailsPanel(keyDetails) {
+  return `
+    <section class="ai-key-details-panel">
+      <div class="ai-key-details-panel__head">
+        <p class="ai-summary-section__label">Key Details</p>
+        <span class="ai-key-details-panel__icon" data-lucide="info"></span>
+      </div>
+      <div class="ai-key-details-panel__rows">
+        ${keyDetails.map((entry) => buildAiKeyDetailsRow(entry)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function buildAiKeyDetailsRow(entry) {
+  const iconName = resolveKeyDetailIcon(entry.label);
+  const isMissing = normalizeText(entry.value) === "Not visible";
+
+  return `
+    <div class="ai-key-details-row">
+      <div class="ai-key-details-row__label">
+        <span class="ai-key-details-row__icon" data-lucide="${escapeHtml(iconName)}"></span>
+        <span>${escapeHtml(entry.label)}</span>
+      </div>
+      <div class="ai-key-details-row__value${isMissing ? " is-missing" : ""}">
+        ${escapeHtml(entry.value)}
+      </div>
+    </div>
+  `;
+}
+
+function resolveKeyDetailIcon(label) {
+  if (label === "Request ID") {
+    return "hash";
+  }
+
+  if (label === "Related Action Item") {
+    return "link-2";
+  }
+
+  if (label === "Requester" || label === "Assigned Lead") {
+    return "user";
+  }
+
+  if (label === "Application") {
+    return "monitor";
+  }
+
+  if (label === "Business / Customer") {
+    return "building-2";
+  }
+
+  if (label === "Origin") {
+    return "globe";
+  }
+
+  if (label === "Due Date") {
+    return "calendar-days";
+  }
+
+  if (label === "Priority / Risk") {
+    return "flag";
+  }
+
+  if (label === "Attachments") {
+    return "paperclip";
+  }
+
+  if (label === "References / Fields") {
+    return "tags";
+  }
+
+  return "file-text";
+}
+
+function buildAiConfidencePanel(confidence) {
+  const level = normalizeAiConfidenceLevel(confidence?.level);
+  const reason = normalizeText(confidence?.reason);
+
+  if (!level && !reason) {
+    return "";
+  }
+
+  return `
+    <section class="ai-summary-section ai-summary-section--confidence is-compact">
+      <div class="ai-summary-section__icon">
+        <span data-lucide="shield-alert"></span>
+      </div>
+      <div class="ai-summary-section__copy">
+        <div class="ai-summary-section__heading-row">
+          <p class="ai-summary-section__label">Confidence</p>
+          ${level ? `<span class="ai-confidence-pill" data-level="${escapeHtml(level.toLowerCase())}">${escapeHtml(level)}</span>` : ""}
+        </div>
+        ${reason ? `<p class="ai-summary-section__body">${escapeHtml(reason)}</p>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function buildAiSummaryFooter(item, index) {
+  const footerParts = [];
+
+  if (normalizeText(item?.footer?.requested)) {
+    footerParts.push(`Requested: ${item.footer.requested}`);
+  }
+
+  if (normalizeText(item?.footer?.lastUpdated)) {
+    footerParts.push(`Last Updated: ${item.footer.lastUpdated}`);
+  }
+
+  return `
+    <footer class="ai-summary-footer">
+      <p class="ai-summary-footer__meta">${escapeHtml(footerParts.join(" | ") || buildTaskLabel(item, index))}</p>
+      ${buildTaskActions(item, index, "ai-summary-footer__actions", true)}
+    </footer>
+  `;
+}
+
+function getDistinctText(candidate, existingTexts) {
+  const normalizedCandidate = normalizeText(candidate);
+
+  if (!normalizedCandidate) {
+    return "";
+  }
+
+  const normalizedNeedle = normalizedCandidate.toLowerCase();
+  const duplicate = existingTexts.some((entry) => {
+    const normalizedEntry = normalizeText(entry).toLowerCase();
+
+    if (!normalizedEntry) {
+      return false;
+    }
+
+    return (
+      normalizedEntry === normalizedNeedle ||
+      normalizedEntry.includes(normalizedNeedle) ||
+      normalizedNeedle.includes(normalizedEntry)
+    );
+  });
+
+  return duplicate ? "" : normalizedCandidate;
+}
+
+function trackDistinctText(existingTexts, value) {
+  const normalizedValue = normalizeText(value);
+
+  if (normalizedValue) {
+    existingTexts.push(normalizedValue);
+  }
+}
+
+function buildSnapshotTodoCard(item, index) {
+  const summaryParts = splitLongText(
+    item.summary || "No summary was extracted for this item.",
+    200
+  );
+  const blockersMarkup = buildBlockerCallout(item.blockers);
+  const detailsMarkup = summaryParts.full
+    ? `
+      <details class="todo-details">
+        <summary>More context</summary>
+        <p>${escapeHtml(summaryParts.full)}</p>
+      </details>
+    `
+    : "";
+  const confidenceText =
+    item.source === "snapshot" ? "Portal snapshot fallback" : "Confidence not available";
+
+  return `
+    <article class="todo-card dashboard-sheen-card ${index === 0 ? "is-leading" : ""}" data-urgency="${escapeHtml(item.urgency)}">
+      <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+      <div class="todo-card-top">
+        <span class="todo-rank">${escapeHtml(index === 0 ? "Up next" : "In queue")}</span>
+        <div class="todo-card-header">
+          ${buildDueBadge(item)}
+          <span class="urgency-badge" data-urgency="${escapeHtml(item.urgency)}">${escapeHtml(formatUrgencyLabel(item.urgency))}</span>
+        </div>
+      </div>
+      <h3>${escapeHtml(item.title)}</h3>
+      <p class="todo-next-label">Next action</p>
+      <p class="todo-next">${escapeHtml(item.nextAction)}</p>
+      <p class="todo-summary">${escapeHtml(summaryParts.preview)}</p>
+      <div class="todo-chip-row">
+        ${buildMetaChips(item)}
+      </div>
+      ${blockersMarkup}
+      ${detailsMarkup}
+      <div class="todo-footer">
+        ${buildTaskActions(item, index, "todo-footer-actions")}
+        <div class="todo-footer-meta">
+          <p class="todo-confidence">${escapeHtml(confidenceText)}</p>
+          ${buildFooterStatusMarkup(item)}
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function buildTaskActions(item, index, className, showFullRequestLabel = false) {
   const openLink = item.href
     ? `
       <a class="todo-open-link" href="${escapeHtml(item.href)}" target="_blank" rel="noreferrer">
-        Open
+        ${showFullRequestLabel ? '<span>View Full Request</span><span data-lucide="external-link"></span>' : "Open"}
       </a>
     `
     : "";
@@ -486,26 +1203,6 @@ function buildTaskLabel(item, index) {
   return `Task ${index + 1}`;
 }
 
-function buildPriorityFooterNote(item) {
-  if (item.blockers.length > 0) {
-    return "Open the request to confirm the unblock step.";
-  }
-
-  return "Open the request when you need the full portal page.";
-}
-
-function buildPriorityReason(item) {
-  if (item.blockers.length > 0) {
-    return "It rises first because it is blocked and needs follow-up before the rest of the queue can move.";
-  }
-
-  if (item.dueDate) {
-    return `It carries the earliest due date in today's queue.`;
-  }
-
-  return "It is the clearest first move in today's queue.";
-}
-
 function buildFooterStatus(item) {
   if (item.blockers.length > 0) {
     return "Needs blocker resolution";
@@ -520,6 +1217,35 @@ function buildFooterStatusMarkup(item) {
   return statusText
     ? `<p class="todo-status">${escapeHtml(statusText)}</p>`
     : "";
+}
+
+function formatGeneratedAtLabel(value) {
+  const parsedDate = value ? new Date(value) : null;
+
+  if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
+    return "Generated just now";
+  }
+
+  return `Generated ${parsedDate.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit"
+  })}`;
+}
+
+function renderLucideIcons(root) {
+  if (!root) {
+    return;
+  }
+
+  createIcons({
+    icons: lucideIcons,
+    root,
+    attrs: {
+      width: "18",
+      height: "18",
+      strokeWidth: "1.9"
+    }
+  });
 }
 
 function buildHeroLede(todoItems, summary, parser) {
@@ -971,6 +1697,10 @@ function clipText(value, maxLength) {
 
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function escapeRegex(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function renderSummary(summary, focusText = "") {
@@ -1482,6 +2212,40 @@ function renderDashboardError(message) {
     <p class="priority-next">${escapeHtml(message)}</p>
     <p class="priority-support">Open Diagnostics if you need to inspect the health check, parser output, or raw portal snapshot.</p>
   `;
+  elements.todoBoard.innerHTML = `
+    <article class="todo-empty">
+      <h3>Attention needed</h3>
+      <p>${escapeHtml(message)}</p>
+    </article>
+  `;
+}
+
+function handleTodoBoardClick(event) {
+  const toggle = event.target.closest("[data-ai-toggle]");
+
+  if (!toggle) {
+    return;
+  }
+
+  const card = toggle.closest("[data-ai-card]");
+
+  if (!card) {
+    return;
+  }
+
+  const expandedPanel = card.querySelector(".ai-summary-card__expanded");
+  const isExpanded = toggle.getAttribute("aria-expanded") === "true";
+  const nextExpandedState = !isExpanded;
+
+  toggle.setAttribute("aria-expanded", nextExpandedState ? "true" : "false");
+  toggle.querySelector("span")?.replaceChildren(
+    document.createTextNode(nextExpandedState ? "Collapse" : "Expand")
+  );
+  card.dataset.expanded = nextExpandedState ? "true" : "false";
+
+  if (expandedPanel) {
+    expandedPanel.hidden = !nextExpandedState;
+  }
 }
 
 async function handleAction(action) {
@@ -1509,6 +2273,8 @@ async function handleAction(action) {
 elements.dashboardRefresh.addEventListener("click", () => {
   handleAction(loadDashboard);
 });
+
+elements.todoBoard.addEventListener("click", handleTodoBoardClick);
 
 async function initializeApp() {
   applyDefaults();
