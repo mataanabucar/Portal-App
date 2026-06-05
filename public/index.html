@@ -151,7 +151,7 @@
       <details class="panel-shell diagnostics-panel">
         <summary>
           <span class="details-title">Diagnostics</span>
-          <span class="details-note">Health, parser output, raw snapshot, and live status.</span>
+          <span class="details-note">Health, final OpenAI payload, parser output, raw snapshot, and live status.</span>
         </summary>
 
         <div class="debug-grid" aria-label="Diagnostics">
@@ -168,8 +168,10 @@
           <article class="debug-card">
             <div class="debug-head">
               <p class="section-kicker">AI</p>
-              <h3>Parser</h3>
+              <h3>Parser request</h3>
             </div>
+            <pre id="parser-request-output">No parser payload yet.</pre>
+            <p class="debug-call-label">payload</p>
             <pre id="parser-output">No parser response yet.</pre>
             <p class="debug-call-label">curl</p>
             <pre id="parser-curl">No parser call yet.</pre>

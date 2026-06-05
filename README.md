@@ -328,7 +328,7 @@ The app sends `store: false` on OpenAI requests so portal data is not stored by 
 
 The local app now also exposes `POST /api/portal/parse`.
 
-This uses the live portal snapshot as model input and supports two modes inspired by the `gentle-day-ai-proxy` `parse-task` endpoint:
+This uses the live portal snapshot as model input and supports two modes:
 
 - structured mode: sends the portal snapshot through a JSON-schema parser and returns normalized request items
 - `testchat` mode: bypasses the parser schema and returns raw assistant text so you can inspect how the model is reading the portal data

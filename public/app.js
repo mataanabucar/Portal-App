@@ -8,6 +8,7 @@ const elements = {
   includeSummary: document.querySelector("#include-summary"),
   dashboardCurl: document.querySelector("#dashboard-curl"),
   parser: document.querySelector("#parser-output"),
+  parserRequest: document.querySelector("#parser-request-output"),
   parserCurl: document.querySelector("#parser-curl"),
   parserFocus: document.querySelector("#parser-focus-text"),
   parserTestchat: document.querySelector("#parser-testchat"),
@@ -160,7 +161,10 @@ function renderDashboard(payload, healthPayload, options = {}) {
 
   elements.summary.innerHTML = summaryMarkup;
   elements.snapshot.textContent = format(payload.snapshot);
-  elements.parser.textContent = format(payload.parser);
+  elements.parserRequest.textContent = payload.parser?.request
+    ? format(payload.parser.request)
+    : "No parser payload was returned.";
+  elements.parser.textContent = format(stripParserRequest(payload.parser) || {});
   elements.health.textContent = format(healthPayload);
   elements.statTotal.textContent = String(todoItems.length);
   elements.statUrgent.textContent = String(urgentCount);
@@ -235,6 +239,8 @@ function normalizeParsedTodo(item = {}, snapshotRecord = null) {
 }
 
 function normalizeSnapshotTodo(record) {
+  const fallbackDueDate = extractDueDateFromRecord(record);
+
   return {
     id: record.id || "",
     href: record.href || "",
@@ -244,7 +250,7 @@ function normalizeSnapshotTodo(record) {
       ? "Review the request details and decide the owner response."
       : "Review the request detail and determine the owner action.",
     summary: record.detail || "",
-    dueDate: record.dueDate || "",
+    dueDate: record.dueDate || fallbackDueDate || "",
     requester: extractRequester(record.detail || ""),
     application: extractApplication(record.detail || ""),
     owner: record.owner || "",
@@ -772,6 +778,25 @@ function extractApplication(detail) {
   return match?.[1]?.trim() || "";
 }
 
+function extractDueDateFromRecord(record = {}) {
+  return (
+    extractDueDateFromDetailPage(record.detailPageContent || "") ||
+    extractDueDateFromDetailText(record.detail || "")
+  );
+}
+
+function extractDueDateFromDetailPage(value) {
+  const match = normalizeText(value).match(/Due Date\s+(\d{1,2}-[A-Za-z]{3}-\d{2,4})/i);
+  return match?.[1] || "";
+}
+
+function extractDueDateFromDetailText(value) {
+  const match = normalizeText(value).match(
+    /(?:[A-Za-z]{3},\s*)?(\d{1,2}-[A-Za-z]{3}-\d{2,4})(?=Due in\s+\d+\s+day(?:\(s\)|s)?)/i
+  );
+  return match?.[1] || "";
+}
+
 function formatTime(timestamp) {
   const parsedDate = new Date(timestamp);
 
@@ -800,15 +825,16 @@ function formatUrgencyLabel(value) {
 
 function buildDueBadge(item) {
   const dueDateLabel = formatDueDateBadgeLabel(item?.dueDate);
+  const dueState = getDueDateState(item?.dueDate);
 
   if (!dueDateLabel) {
     return "";
   }
 
   return `
-    <span class="due-badge urgency-badge" data-urgency="${escapeHtml(
-      normalizeUrgency(item?.urgency)
-    )}">
+    <span class="due-badge urgency-badge${dueState === "today" ? " is-due-today" : ""}" data-urgency="${escapeHtml(
+      resolveDueBadgeUrgency(item?.dueDate, item?.urgency)
+    )}" data-due-state="${escapeHtml(dueState)}">
       <span class="due-badge__date">Due: ${escapeHtml(dueDateLabel)}</span>
       <span class="due-badge__distance">${escapeHtml(
         formatDueDateDistanceLabel(item?.dueDate)
@@ -848,19 +874,63 @@ function formatDueDateDistanceLabel(value) {
     return "Due today";
   }
 
-  if (dayDifference === 1) {
-    return "In 1 day";
+  if (dayDifference > 0) {
+    return `In ${dayDifference} day(s)`;
   }
 
-  if (dayDifference > 1) {
-    return `In ${dayDifference} days`;
+  return `${Math.abs(dayDifference)} day(s) overdue`;
+}
+
+function resolveDueBadgeUrgency(dueDate, urgency) {
+  const dayDifference = getDueDateDayDifference(dueDate);
+
+  if (dayDifference === null) {
+    return normalizeUrgency(urgency);
   }
 
-  if (dayDifference === -1) {
-    return "1 day overdue";
+  if (dayDifference <= 0) {
+    return "critical";
   }
 
-  return `${Math.abs(dayDifference)} days overdue`;
+  if (dayDifference <= 7) {
+    return "high";
+  }
+
+  if (dayDifference <= 21) {
+    return "normal";
+  }
+
+  return "low";
+}
+
+function getDueDateState(value) {
+  const dayDifference = getDueDateDayDifference(value);
+
+  if (dayDifference === null) {
+    return "none";
+  }
+
+  if (dayDifference === 0) {
+    return "today";
+  }
+
+  if (dayDifference < 0) {
+    return "overdue";
+  }
+
+  return "scheduled";
+}
+
+function getDueDateDayDifference(value) {
+  const parsedValue = parseDueDateValue(value);
+
+  if (parsedValue === null) {
+    return null;
+  }
+
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((parsedValue - todayUtc) / 86_400_000);
 }
 
 function formatUtcDateLabel(timestamp) {
@@ -1110,6 +1180,7 @@ function clearDashboardUi() {
   elements.summary.innerHTML =
     '<p class="summary-empty">No saved summary yet. Refresh the queue to fetch and store one.</p>';
   elements.snapshot.textContent = "No saved portal snapshot yet.";
+  elements.parserRequest.textContent = "No saved parser payload yet.";
   elements.parser.textContent = "No saved parser response yet.";
   elements.health.textContent = "No saved health response yet.";
   updateDiagnosticsCurlCommands(readCurrentControls());
@@ -1353,6 +1424,15 @@ function buildDashboardCurlCommand(controls) {
       parserTestchat: controls.parserTestchat
     }
   });
+}
+
+function stripParserRequest(parser) {
+  if (!parser || typeof parser !== "object") {
+    return parser;
+  }
+
+  const { request, ...parserWithoutRequest } = parser;
+  return parserWithoutRequest;
 }
 
 function buildCurlCommand({ method, path, body }) {

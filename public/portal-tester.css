@@ -1,0 +1,248 @@
+.tester-shell {
+  padding-bottom: 56px;
+}
+
+.tester-hero-copy {
+  align-items: flex-start;
+}
+
+.tester-hero-copy > div {
+  display: grid;
+  gap: 10px;
+}
+
+.tester-hero-actions {
+  align-items: center;
+}
+
+.tester-nav-link {
+  min-height: 48px;
+}
+
+.tester-secondary-button,
+.tester-inline-button {
+  color: var(--text);
+  background: linear-gradient(
+    180deg,
+    rgba(30, 41, 59, 0.96),
+    rgba(15, 23, 42, 0.92)
+  );
+  border-color: rgba(148, 163, 184, 0.24);
+  box-shadow: 0 12px 26px rgba(2, 8, 23, 0.22);
+  text-shadow: none;
+}
+
+.tester-secondary-button:hover,
+.tester-inline-button:hover {
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.28);
+}
+
+.tester-route-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.tester-focus-wide {
+  grid-column: 1 / -1;
+}
+
+.tester-route-card,
+.tester-config-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, 0.92),
+    rgba(8, 15, 22, 0.96)
+  );
+  box-shadow: var(--shadow-soft);
+}
+
+.tester-route-card.is-primary {
+  border-color: rgba(34, 211, 238, 0.3);
+}
+
+.tester-route-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.tester-route-head h3,
+.tester-config-card h3 {
+  margin: 0;
+  font-family: "Bahnschrift", "Aptos", "Segoe UI", sans-serif;
+  font-size: 1.18rem;
+  letter-spacing: -0.02em;
+}
+
+.tester-route-copy {
+  min-height: 4.9rem;
+  margin: 0 0 16px;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.tester-route-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tester-route-state[data-state="running"] {
+  color: #311800;
+  border-color: rgba(255, 222, 162, 0.56);
+  background: linear-gradient(180deg, #ffd974 0%, #ffbe41 100%);
+}
+
+.tester-route-state[data-state="success"] {
+  color: #0b1805;
+  border-color: rgba(214, 255, 175, 0.7);
+  background: linear-gradient(180deg, #b8ff66 0%, #95f545 100%);
+}
+
+.tester-route-state[data-state="error"] {
+  color: #fff1ec;
+  border-color: rgba(255, 151, 126, 0.46);
+  background: linear-gradient(180deg, #ff8a68 0%, #e7573b 100%);
+}
+
+.tester-panel-head {
+  margin-bottom: 14px;
+}
+
+.tester-inline-checkbox {
+  align-self: start;
+  margin-top: 4px;
+}
+
+.tester-config-grid {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.tester-field-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tester-field-span-2 {
+  grid-column: 1 / -1;
+}
+
+.tester-config-card .debug-head {
+  margin-bottom: 14px;
+}
+
+.tester-config-card .debug-head h3 {
+  font-size: 1.08rem;
+}
+
+.tester-config-card .stacked-field {
+  gap: 8px;
+}
+
+.tester-config-card .stacked-field span,
+.tester-shell .stacked-field span {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.tester-shell input,
+.tester-shell select,
+.tester-shell textarea {
+  width: 100%;
+  border: 1px solid rgba(88, 114, 133, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  color: var(--text);
+  background: rgba(7, 13, 19, 0.82);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background var(--transition-fast);
+}
+
+.tester-shell select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, rgba(140, 239, 255, 0.85) 50%),
+    linear-gradient(135deg, rgba(140, 239, 255, 0.85) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) calc(50% - 2px),
+    calc(100% - 14px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 40px;
+}
+
+.tester-shell input:hover,
+.tester-shell select:hover,
+.tester-shell textarea:hover {
+  border-color: rgba(53, 215, 255, 0.28);
+}
+
+.tester-shell input::placeholder,
+.tester-shell textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.tester-debug-grid {
+  align-items: start;
+}
+
+.tester-debug-grid .debug-card {
+  display: grid;
+  gap: 12px;
+}
+
+.tester-debug-grid .debug-card pre {
+  min-height: 13rem;
+}
+
+.tester-inline-button {
+  justify-self: start;
+  padding-inline: 16px;
+}
+
+@media (max-width: 1080px) {
+  .tester-route-grid,
+  .tester-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tester-field-span-2 {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .tester-route-card,
+  .tester-config-card {
+    padding: 16px;
+  }
+
+  .tester-route-copy {
+    min-height: 0;
+  }
+}

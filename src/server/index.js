@@ -2,7 +2,11 @@ import "dotenv/config";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { buildConfig } from "./config/env.js";
-import { createPortalParser, createSummarizer } from "./services/ai/index.js";
+import {
+  createAskService,
+  createPortalParser,
+  createSummarizer
+} from "./services/ai/index.js";
 import { createPortalService } from "./services/portal/index.js";
 
 export function startServer(overrides = {}) {
@@ -12,7 +16,8 @@ export function startServer(overrides = {}) {
     config,
     portalService,
     summarizer: createSummarizer(config),
-    parser: createPortalParser(config)
+    parser: createPortalParser(config),
+    asker: createAskService(config)
   });
   let disposed = false;
 

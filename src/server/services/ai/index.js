@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { createAskService } from "./ask.js";
 import { createDisabledSummarizer } from "./disabledSummarizer.js";
 import { createPortalParser } from "./portalParser.js";
 
@@ -37,6 +38,7 @@ export function createSummarizer(config) {
 }
 
 export { createPortalParser };
+export { createAskService };
 
 function buildInstructions(focus) {
   const focusLine = normalizeFocus(focus)

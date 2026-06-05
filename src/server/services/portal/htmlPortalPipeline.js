@@ -1,5 +1,4 @@
 import * as cheerio from "cheerio";
-import { extractOpenAiPortalFieldsFromText } from "./openAiPortalFields.js";
 
 export async function runHtmlPortalPipeline({
   config,
@@ -201,8 +200,12 @@ async function enrichRecordsWithDetailPages({ config, records, fetchHtmlPage }) 
         detailPageTitle: detailPage.title,
         detailPageContent: detailPage.content,
         detailPageFullContent: detailPage.fullContent,
-        owner: detailPage.assignedLead || record.owner,
-        openAiFields: detailPage.openAiFields
+        dueDate: detailPage.dueDate || record.dueDate || "",
+        application: detailPage.application || record.application || "",
+        business: detailPage.business || record.business || "",
+        issueItem: detailPage.issueItem || record.issueItem || "",
+        requestHistory: detailPage.requestHistory || record.requestHistory || "",
+        owner: detailPage.assignedLead || record.owner
       };
     } catch (error) {
       enrichedRecords[index] = {
@@ -219,6 +222,19 @@ function extractDetailPage({ config, html, fallbackTitle }) {
   const $ = cheerio.load(html);
   removeNonContentNodes($);
   const assignedLead = selectFormValue($, "#DevItem");
+  const dueDate = selectLabeledFieldValue($, "Due Date");
+  const application =
+    selectHiddenFormValue($, "#AppItem") ||
+    selectLabeledFieldValue($, "Application");
+  const business =
+    selectHiddenFormValue($, "#BusItem") ||
+    cleanupBusinessVisibleValue(selectLabeledFieldValue($, "Business"));
+  const issueItem = selectHiddenFormValue($, "#EditID");
+  const requestHistory = normalizeRequestHistoryTable(
+    $,
+    "#aihistory",
+    config.portalDetailMaxChars
+  );
   const title =
     selectDocumentText($, config.portalDetailTitleSelector) ||
     sanitizeExtractedText($("h1").first().text()) ||
@@ -228,18 +244,17 @@ function extractDetailPage({ config, html, fallbackTitle }) {
   const fullContent =
     selectDocumentText($, config.portalDetailContentSelector) ||
     sanitizeExtractedText($("body").text());
-  const openAiFields = extractOpenAiPortalFieldsFromText(fullContent);
-
-  if (assignedLead) {
-    openAiFields["Assigned Lead"] = assignedLead;
-  }
 
   return {
     title,
     content: fullContent.slice(0, config.portalDetailMaxChars),
     fullContent,
     assignedLead,
-    openAiFields
+    dueDate,
+    application,
+    business,
+    issueItem,
+    requestHistory
   };
 }
 
@@ -281,6 +296,98 @@ function selectFormValue($, selector) {
   }
 
   return sanitizeExtractedText(field.attr("value") || "");
+}
+
+function selectHiddenFormValue($, selector) {
+  return selectFormValue($, selector);
+}
+
+function selectLabeledFieldValue($, labelText) {
+  const label = findLabelElement($, labelText);
+
+  if (!label.length) {
+    return "";
+  }
+
+  const formGroup = label.closest(".form-group");
+
+  if (!formGroup.length) {
+    return "";
+  }
+
+  const directColumn = formGroup.children("div[class*='col-sm-']").first();
+  const valueContainer = directColumn.length
+    ? directColumn
+    : formGroup.find("div[class*='col-sm-']").first();
+
+  return sanitizeExtractedText(valueContainer.text());
+}
+
+function findLabelElement($, labelText) {
+  const normalizedLabel = normalizeText(labelText);
+  const labelElements = $("label").toArray();
+
+  const exactMatch = labelElements.find(
+    (element) => sanitizeExtractedText($(element).text()) === normalizedLabel
+  );
+
+  if (exactMatch) {
+    return $(exactMatch);
+  }
+
+  const fallbackMatch = labelElements.find(
+    (element) =>
+      sanitizeExtractedText($(element).text()).toLowerCase() ===
+      normalizedLabel.toLowerCase()
+  );
+
+  return fallbackMatch ? $(fallbackMatch) : $();
+}
+
+function cleanupBusinessVisibleValue(value) {
+  return sanitizeExtractedText(
+    String(value || "")
+      .replace(/\s*\([^)]*\)\s*$/g, "")
+      .replace(/\s*-\s*Business ID:\s*\d+\s*$/i, "")
+  );
+}
+
+function normalizeRequestHistoryTable($, selector, maxChars) {
+  if (!selector) {
+    return "";
+  }
+
+  const rows = $(selector).find("tr").toArray();
+
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const entries = rows
+    .map((row) =>
+      $(row)
+        .find("td")
+        .toArray()
+        .map((cell) => sanitizeExtractedText($(cell).text()))
+        .filter(Boolean)
+    )
+    .filter((cells) => cells.length >= 2)
+    .filter((cells) => normalizeText(cells[0]) !== "Request History")
+    .map((cells) => formatHistoryEntry(cells))
+    .filter(Boolean);
+
+  return clipText(entries.join(" || "), maxChars);
+}
+
+function formatHistoryEntry(cells) {
+  const [sequence = "", message = "", effort = ""] = cells;
+  const summary = [sequence, message].filter(Boolean).join(" ");
+
+  if (!summary) {
+    return "";
+  }
+
+  return effort ? `${summary} | Effort: ${effort}` : summary;
 }
 
 function resolveRecordId({ href, rawIdText, index }) {
@@ -356,6 +463,18 @@ function resolveHref(baseUrl, href) {
 
 function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function clipText(value, maxChars) {
+  const normalizedValue = sanitizeExtractedText(value);
+
+  if (!normalizedValue) {
+    return "";
+  }
+
+  return normalizedValue.length > maxChars
+    ? `${normalizedValue.slice(0, maxChars)}...`
+    : normalizedValue;
 }
 
 function buildAutoRedirectRequest(page) {

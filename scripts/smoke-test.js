@@ -3,6 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { detectBrowserExecutablePath } from "../src/server/services/portal/browserExecutable.js";
+import { buildOpenAiPortalPayload } from "../src/server/services/portal/openAiPortalFields.js";
 import {
   clearPortalCookieCache,
   readPortalCookieCache
@@ -10,11 +11,16 @@ import {
 
 const ALLOWED_OPENAI_RECORD_KEYS = [
   "Application",
+  "ID",
   "Business",
   "Due Date",
-  "Request Details",
-  "Assigned Lead",
-  "Request History"
+  "Detail",
+  "IssueItem",
+  "Owner",
+  "Priority",
+  "Request History",
+  "Status",
+  "Title"
 ];
 
 async function run() {
@@ -92,6 +98,12 @@ async function runMockScenario() {
         testchat: true
       })
     });
+    const ask = await fetchJson(`${baseUrl}/api/ask`, {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: "What is the capital of Arizona? And what is the population?"
+      })
+    });
     const dashboard = await fetchJson(`${baseUrl}/api/dashboard`, {
       method: "POST",
       body: JSON.stringify({
@@ -102,6 +114,19 @@ async function runMockScenario() {
       })
     });
     const parserPayload = JSON.parse(parser.parser.originalText);
+    const privacyProbe = buildOpenAiPortalPayload([
+      {
+        id: "SAFE-1",
+        title: "Safe title",
+        status: "Open",
+        owner: "Taylor",
+        priority: "High",
+        dueDate: "2026-06-30",
+        detail: "Safe row summary",
+        detailPageContent: "never-send-this",
+        detailPageFullContent: "never-send-this-either"
+      }
+    ]);
 
     console.log("Page served:", page.includes("Portal Visualizer"));
     console.log("Health OK:", health.ok === true);
@@ -112,9 +137,26 @@ async function runMockScenario() {
       parser.snapshot.recordCount === 3 && parser.parser.mode === "testchat"
     );
     console.log(
+      "Parser request cached:",
+      parser.parser.request?.input === parser.parser.originalText &&
+        parser.parser.request?.store === false &&
+        !Object.prototype.hasOwnProperty.call(parser.parser.request, "text")
+    );
+    console.log(
+      "Ask route OK:",
+      ask.enabled === false &&
+        ask.debug?.endpoint === "/api/ask" &&
+        ask.debug?.mode === "direct"
+    );
+    console.log(
       "Dashboard route OK:",
       dashboard.snapshot.recordCount === 3 &&
         dashboard.parser.mode === "structured"
+    );
+    console.log(
+      "Dashboard parser request cached:",
+      dashboard.parser.request?.input === dashboard.parser.originalText &&
+        dashboard.parser.request?.text?.format?.type === "json_schema"
     );
     console.log(
       "Dashboard record link retained:",
@@ -130,6 +172,16 @@ async function runMockScenario() {
     console.log(
       "OpenAI payload fields OK:",
       hasOnlyAllowedOpenAiFields(parserPayload)
+    );
+    console.log(
+      "OpenAI payload excludes transport-only fields:",
+      !Object.prototype.hasOwnProperty.call(parserPayload.Records[0] || {}, "Href") &&
+        !Object.prototype.hasOwnProperty.call(parserPayload.Records[0] || {}, "Requester")
+    );
+    console.log(
+      "OpenAI payload excludes detail-page bodies:",
+      !JSON.stringify(privacyProbe).includes("never-send-this") &&
+        !JSON.stringify(privacyProbe).includes("never-send-this-either")
     );
   } finally {
     await dispose();
@@ -171,6 +223,28 @@ async function runDashboardCachePersistenceScenario() {
       },
       parser: {
         mode: "structured",
+        request: {
+          model: "gpt-4.1-mini",
+          store: false,
+          instructions: "Test instructions",
+          input: "{\"Records\":[]}",
+          text: {
+            format: {
+              type: "json_schema",
+              name: "portal_visualizer_parse_v1",
+              strict: true,
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  overview: { type: "string" },
+                  items: { type: "array", items: { type: "object" } }
+                },
+                required: ["overview", "items"]
+              }
+            }
+          }
+        },
         parsed: {
           items: [
             {
@@ -238,6 +312,8 @@ async function runDashboardCachePersistenceScenario() {
       "Dashboard cache survives restart:",
       cachedDashboard?.payload?.snapshot?.recordCount === 1 &&
         cachedDashboard?.controls?.focus === "Tell me what matters today." &&
+        cachedDashboard?.payload?.parser?.request?.input ===
+          "{\"Records\":[]}" &&
         cachedDashboard?.payload?.snapshot?.records?.[0]?.href ===
           "https://portal.example.test/request/REQ-1"
     );
@@ -296,9 +372,22 @@ async function runLinkedHtmlScenario() {
           "Corrective action evidence still missing."
     );
     console.log(
-      "Assigned lead from DevItem OK:",
-      preview.snapshot.records[0]?.owner === "Avery Quinn" &&
-        parserPayload.Records[0]?.["Assigned Lead"] === "Avery Quinn"
+      "Detail payload extraction OK:",
+      preview.snapshot.records[0]?.application === "Action Tracking System" &&
+        preview.snapshot.records[0]?.business === "Goodyear EHS" &&
+        preview.snapshot.records[0]?.issueItem === "1229030" &&
+        preview.snapshot.records[0]?.owner === "Avery Quinn" &&
+        preview.snapshot.records[0]?.requestHistory?.includes(
+          "1. Updated By Avery Quinn"
+        ) &&
+        parserPayload.Records[0]?.Owner === "Avery Quinn" &&
+        parserPayload.Records[0]?.IssueItem === "1229030" &&
+        parserPayload.Records[0]?.["Request History"]?.includes(
+          "1. Updated By Avery Quinn"
+        ) &&
+        !parserPayload.Records[0]?.["Request History"]?.includes(
+          "Request History Effort"
+        )
     );
     console.log(
       "Detail link retained in client snapshot:",
@@ -355,9 +444,13 @@ async function runIframeHtmlScenario() {
         preview.snapshot.records[1]?.detailPageTitle === "Request A-118"
     );
     console.log(
-      "Iframe assigned lead from DevItem OK:",
-      preview.snapshot.records[1]?.owner === "Morgan Lee" &&
-        parserPayload.Records[1]?.["Assigned Lead"] === "Morgan Lee"
+      "Iframe detail payload extraction OK:",
+      preview.snapshot.records[1]?.application === "Novolex Audit Assistant" &&
+        preview.snapshot.records[1]?.business === "Novolex" &&
+        preview.snapshot.records[1]?.issueItem === "1232413" &&
+        preview.snapshot.records[1]?.owner === "Morgan Lee" &&
+        parserPayload.Records[1]?.Owner === "Morgan Lee" &&
+        parserPayload.Records[1]?.IssueItem === "1232413"
     );
     console.log(
       "Iframe action item IDs retained:",
@@ -487,9 +580,13 @@ async function runBrowserHtmlScenario() {
           "Corrective action evidence still missing."
     );
     console.log(
-      "Browser assigned lead from DevItem OK:",
-      preview.snapshot.records[0]?.owner === "Avery Quinn" &&
-        parserPayload.Records[0]?.["Assigned Lead"] === "Avery Quinn"
+      "Browser detail payload extraction OK:",
+      preview.snapshot.records[0]?.application === "Action Tracking System" &&
+        preview.snapshot.records[0]?.business === "Goodyear EHS" &&
+        preview.snapshot.records[0]?.issueItem === "1229030" &&
+        preview.snapshot.records[0]?.owner === "Avery Quinn" &&
+        parserPayload.Records[0]?.Owner === "Avery Quinn" &&
+        parserPayload.Records[0]?.IssueItem === "1229030"
     );
     console.log(
       "Browser action item ID retained:",
@@ -992,14 +1089,95 @@ function buildCookieIframeListPage() {
 }
 
 function buildDetailPage(title, detail) {
-  const assignedLead = title === "Request A-118" ? "Morgan Lee" : "Avery Quinn";
+  const detailFixture =
+    title === "Request A-118"
+      ? {
+          application: "Novolex Audit Assistant",
+          business: "Novolex",
+          businessDisplay:
+            "Novolex - Business ID: 2001<br>(GSUSE1SQLAG08 - CC_Novolex)",
+          assignedLead: "Morgan Lee",
+          issueItem: "1232413",
+          historyRows: [
+            {
+              sequence: "1.",
+              message:
+                "Updated By Morgan Lee\nWed 29-May-2026 09:15 AM US/ET\n\nSupplier documentation is incomplete.",
+              effort: "0.50"
+            },
+            {
+              sequence: "2.",
+              message:
+                "Updated By John Example\nTue 28-May-2026 04:10 PM US/ET\n\nFollowing up after the support call.",
+              effort: "0.08"
+            }
+          ]
+        }
+      : {
+          application: "Action Tracking System",
+          business: "Goodyear EHS",
+          businessDisplay:
+            "Goodyear EHS - Business ID: 1995<br>(GSUSE1SQLAG05 - CC_Goodyear)",
+          assignedLead: "Avery Quinn",
+          issueItem: "1229030",
+          historyRows: [
+            {
+              sequence: "1.",
+              message:
+                "Updated By Avery Quinn\nTue 02-Jun-2026 01:22 PM US/ET\n\nCorrective action evidence still missing.",
+              effort: "0.08"
+            },
+            {
+              sequence: "2.",
+              message:
+                "Updated By Jordan Smith\nTue 02-Jun-2026 08:43 AM US/ET\n\nWaiting on evidence from Plant 4.",
+              effort: "0.50"
+            }
+          ]
+        };
 
   return `
     <html>
       <body>
         <h1>${title}</h1>
-        <input id="DevItem" value="${assignedLead}" />
+        <div class="form-group">
+          <label class="col-sm-3 control-label">Application</label>
+          <div class="col-sm-6">
+            <p class="form-control-static">${detailFixture.application}</p>
+            <input type="hidden" name="AppItem" id="AppItem" value="${detailFixture.application}" data-appid="3" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="col-sm-3 control-label">Business</label>
+          <div class="col-sm-6">
+            <p class="form-control-static">${detailFixture.businessDisplay}</p>
+            <input type="hidden" name="BusItem" id="BusItem" value="${detailFixture.business}" />
+          </div>
+        </div>
+        <input type="hidden" name="EditID" id="EditID" value="${detailFixture.issueItem}" />
+        <select name="DevItem" id="DevItem" class="form-control input-sm chosen-required" style="display: none;">
+          <option value="">Select Lead...</option>
+          <option value="Avery Quinn"${detailFixture.assignedLead === "Avery Quinn" ? ' selected=""' : ""}>Avery Quinn</option>
+          <option value="Morgan Lee"${detailFixture.assignedLead === "Morgan Lee" ? ' selected=""' : ""}>Morgan Lee</option>
+        </select>
         <section id="request-detail">${detail}</section>
+        <table id="aihistory">
+          <tr>
+            <td>Request History</td>
+            <td>Effort</td>
+          </tr>
+          ${detailFixture.historyRows
+            .map(
+              (row) => `
+                <tr>
+                  <td>${row.sequence}</td>
+                  <td>${row.message}</td>
+                  <td>${row.effort}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </table>
         <script>
           const jwtToken = "eyJmock.payload.signature";
           const jwtTokenKey = "0123456789ABCDEF0123456789ABCDEF";

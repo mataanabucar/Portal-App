@@ -30,7 +30,7 @@
 - Removed inline scripts and token-like secrets from extracted detail-page content and raw previews before returning snapshots to the browser UI.
 - Added browser-session recovery so if the mirrored Chrome window is closed manually, the next preview request recreates the Playwright session instead of failing with `browserContext.newPage: Target page, context or browser has been closed`.
 - Changed mirrored-profile sync to tolerate locked files from the normal Chrome Beta source profile, so an open default browser no longer fails preview requests on `Cookies` copy locks.
-- Inspected the `gentle-day-ai-proxy` `newDevWclaudeAI` branch and reused its `testchat` pattern as the reference for a new local `POST /api/portal/parse` route.
+- Reviewed an earlier parser prototype and reused its `testchat` pattern as the reference for a new local `POST /api/portal/parse` route.
 - Added a portal parser service with structured JSON-schema mode and raw `testchat` bypass mode, plus a minimal parser control in the local browser UI.
 - Switched the app default OpenAI model from `gpt-5` to `gpt-4.1-mini` in config, `.env`, and setup examples.
 - Updated the app default OpenAI model from `gpt-4.1-mini` to `gpt-5.4-mini` in config, `.env`, and setup examples.
@@ -38,6 +38,9 @@
 - Added forced default control values on page load: summary enabled, parser test chat disabled, and prefilled prompts for both summary and structured parsing.
 - Reworked the frontend from a debug-first test harness into an auto-loading dashboard with a readable action brief, top-line stats, and distinct to-do cards for each portal item.
 - Added a consolidated `POST /api/dashboard` route so the page can fetch one portal snapshot and derive both the summary and structured parser output from the same data load.
+- Removed the local scratch checkout and scrubbed old proxy-specific wording from the repo docs.
+- Added `notes/2026-06-05-portal-visualizer-workflow.md` with a code-backed end-to-end workflow map, Mermaid flows, route inventory, cache/storage notes, and the snapshot-to-OpenAI payload path.
+- Added a separate `public/portal-tester.html` mini app plus optional per-request tester config overrides on the main server routes, so portal modes, selectors, browser settings, AI toggles, and cache targets can be exercised from the browser without changing `.env`.
 - Restricted the OpenAI-bound portal payload to only six fields per request item: `Application`, `Business`, `Due Date`, `Request Details`, `Assigned Lead`, and `Request History`.
 - Added detail-page field extraction so the app derives those six fields from full request pages before clipping or sending any model input.
 - Removed the parser-side `Focus` field from the JSON payload so the model-bound data body now contains only the six allowed portal fields, with user focus carried separately as instructions.

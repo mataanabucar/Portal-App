@@ -1,4 +1,5 @@
 import { buildPortalParserInput } from "./portalParserInput.js";
+import { buildPortalParserRequest } from "./portalParserRequest.js";
 
 const RESPONSE_VERSION = "2026-06-portal-parse-v2";
 
@@ -20,6 +21,12 @@ export function createDisabledPortalParser(config) {
     async parseSnapshot(snapshot, options = {}) {
       const originalText = buildPortalParserInput(snapshot);
       const testchat = isTestchatEnabled(config, options.testchat);
+      const request = buildPortalParserRequest({
+        model: config.openAiModel,
+        originalText,
+        testchat,
+        focus: options.focus
+      });
 
       return testchat
         ? {
@@ -29,6 +36,7 @@ export function createDisabledPortalParser(config) {
             testchat: true,
             reason,
             originalText,
+            request,
             responseText:
               "Portal parser is disabled. Enable OPENAI_ENABLED=true and set OPENAI_API_KEY to inspect raw test chat output.",
             debug: buildDebugObject(config, "testchat")
@@ -40,6 +48,7 @@ export function createDisabledPortalParser(config) {
             testchat: false,
             reason,
             originalText,
+            request,
             parsed: {
               overview:
                 "Portal parser is disabled. Enable OPENAI_ENABLED=true and set OPENAI_API_KEY to receive structured portal parsing.",
