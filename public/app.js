@@ -1,10 +1,8 @@
 import {
   ArrowRight,
   BadgeCheck,
-  Bot,
   Building2,
   CalendarDays,
-  ChevronDown,
   Clock3,
   ExternalLink,
   FileText,
@@ -16,7 +14,9 @@ import {
   Link2,
   Monitor,
   Paperclip,
-  ShieldAlert,
+  RefreshCw,
+  SearchCheck,
+  ShieldCheck,
   Sparkles,
   Tags,
   TriangleAlert,
@@ -27,10 +27,8 @@ import {
 const lucideIcons = {
   ArrowRight,
   BadgeCheck,
-  Bot,
   Building2,
   CalendarDays,
-  ChevronDown,
   Clock3,
   ExternalLink,
   FileText,
@@ -42,7 +40,9 @@ const lucideIcons = {
   Link2,
   Monitor,
   Paperclip,
-  ShieldAlert,
+  RefreshCw,
+  SearchCheck,
+  ShieldCheck,
   Sparkles,
   Tags,
   TriangleAlert,
@@ -677,14 +677,12 @@ function renderTodoBoard(items, parser) {
 }
 
 function buildAiSummaryCard(item, index) {
-  const expandedId = buildAiSummaryExpandedId(item, index);
   const sections = buildAiSummarySections(item);
 
   return `
     <article
       class="todo-card ai-summary-card ${index === 0 ? "is-leading" : ""}"
       data-ai-card
-      data-expanded="false"
       data-urgency="${escapeHtml(item.urgency)}"
     >
       <header class="ai-summary-card__header">
@@ -701,50 +699,39 @@ function buildAiSummaryCard(item, index) {
             <span>${escapeHtml(formatGeneratedAtLabel(item.generatedAt))}</span>
           </p>
           <button
-            class="ai-summary-card__toggle"
+            class="ai-summary-card__regenerate"
             type="button"
-            data-ai-toggle
-            aria-expanded="false"
-            aria-controls="${escapeHtml(expandedId)}"
+            data-ai-regenerate
+            aria-label="Regenerate AI summary"
           >
-            <span>Expand</span>
-            <span class="ai-summary-card__toggle-icon" data-lucide="chevron-down"></span>
+            <span data-lucide="refresh-cw"></span>
+            <span>Regenerate</span>
           </button>
         </div>
       </header>
-      <section class="ai-summary-card__title-panel">
-        <div class="ai-summary-card__title-icon">
-          <span data-lucide="bot"></span>
-        </div>
-        <div class="ai-summary-card__title-copy">
-          <p class="ai-summary-card__eyebrow">${escapeHtml(index === 0 ? "Up next" : "In queue")}</p>
-          <h3>${escapeHtml(item.title)}</h3>
-          <div class="ai-summary-card__pill-row">
-            ${buildAiStatusPill(item.status)}
-            ${buildAiPriorityPill(item.priority)}
-            ${buildAiDuePill(item)}
-          </div>
-          <div class="ai-summary-card__collapsed-preview">
-            <div class="ai-summary-card__preview-line">
-              <p class="ai-summary-card__preview-label">Next action</p>
-              <p class="ai-summary-card__preview-text">${escapeHtml(item.nextAction)}</p>
+      <div class="ai-summary-card__body-grid">
+        <div class="ai-summary-card__left">
+          <section class="ai-summary-card__title-panel">
+            <div class="ai-summary-card__title-icon">
+              <span data-lucide="search-check"></span>
             </div>
-            ${buildAiSummaryBlockerPreview(item.blockersOpenQuestions)}
-          </div>
+            <div class="ai-summary-card__title-copy">
+              <h3>${escapeHtml(item.title)}</h3>
+              <div class="ai-summary-card__pill-row">
+                ${buildAiStatusPill(item.status)}
+                ${buildAiPriorityPill(item.priority)}
+                ${buildAiDuePill(item)}
+              </div>
+            </div>
+          </section>
+          ${sections.left.join("")}
         </div>
-      </section>
-      <div class="ai-summary-card__expanded" id="${escapeHtml(expandedId)}" hidden>
-        <div class="ai-summary-card__expanded-grid">
-          <div class="ai-summary-card__left">
-            ${sections.left.join("")}
-          </div>
-          <div class="ai-summary-card__right">
-            ${buildAiKeyDetailsPanel(item.keyDetails)}
-            ${sections.right.join("")}
-          </div>
+        <div class="ai-summary-card__right">
+          ${buildAiKeyDetailsPanel(item.keyDetails)}
+          ${sections.right.join("")}
         </div>
-        ${buildAiSummaryFooter(item, index)}
       </div>
+      ${buildAiSummaryFooter(item, index)}
     </article>
   `;
 }
@@ -806,8 +793,9 @@ function buildAiDuePill(item) {
     <span class="due-badge urgency-badge${dueState === "today" ? " is-due-today" : ""}" data-urgency="${escapeHtml(
       dueUrgency
     )}" data-due-state="${escapeHtml(dueState)}">
+      <span class="due-badge__icon" data-lucide="calendar-days"></span>
       <span class="due-badge__date">Due: ${escapeHtml(dueDateLabel)}</span>
-      <span class="due-badge__distance">${escapeHtml(relativeLabel)}</span>
+      <span class="due-badge__distance">(${escapeHtml(relativeLabel)})</span>
     </span>
   `;
 }
@@ -1035,7 +1023,7 @@ function buildAiConfidencePanel(confidence) {
   return `
     <section class="ai-summary-section ai-summary-section--confidence is-compact">
       <div class="ai-summary-section__icon">
-        <span data-lucide="shield-alert"></span>
+        <span data-lucide="shield-check"></span>
       </div>
       <div class="ai-summary-section__copy">
         <div class="ai-summary-section__heading-row">
@@ -2221,6 +2209,13 @@ function renderDashboardError(message) {
 }
 
 function handleTodoBoardClick(event) {
+  const regenerateBtn = event.target.closest("[data-ai-regenerate]");
+
+  if (regenerateBtn) {
+    handleAction(loadDashboard);
+    return;
+  }
+
   const toggle = event.target.closest("[data-ai-toggle]");
 
   if (!toggle) {
