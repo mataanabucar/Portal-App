@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChatFilterSettings",
+  "type": "object",
+  "properties": {
+    "model": {
+      "type": "string",
+      "oneOf": [
+        { "const": "anthropic.claude-sonnet-4-20250514-v1:0", "title": "Claude-4-Sonnet" },
+        { "const": "anthropic.claude-sonnet-4-5-20250929-v1:0", "title": "Claude-4.5-Sonnet" },
+        { "const": "anthropic.claude-haiku-4-5-20251001-v1:0", "title": "Claude-4.5-Haiku" }
+      ],
+      "default": "anthropic.claude-haiku-4-5-20251001-v1:0"
+    },
+    "large_context_model": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "default": "off"
+    },
+    "extended_thinking": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "default": "off"
+    },
+    "rememberConvo": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "default": "on"
+    },
+    "enterIsSend": {
+      "type": "string",
+      "enum": ["on", "off"],
+      "default": "on"
+    },
+    "temperature": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.5
+    },
+    "wordLimit": {
+      "type": "integer",
+      "minimum": 50,
+      "maximum": 2500,
+      "multipleOf": 50,
+      "default": 1500
+    },
+    "formatTone": {
+      "type": "string",
+      "enum": [
+        "Friendly + Professional",
+        "Authoritative + Informative",
+        "Urgent + Persuasive",
+        "Casual + Conversational",
+        "Professional + Trustworthy",
+        "Humorous + Informal",
+        "Professional + Straightforward",
+        "Serious + Empathetic",
+        "Positive + Enthusiastic",
+        "Authoritative + Professional",
+        "Casual + Funny",
+        "Authoritative + Experts"
+      ],
+      "default": "Professional + Straightforward"
+    },
+    "formatStyle": {
+      "type": "string",
+      "enum": ["any", "Bulleted list", "Paragraph", "Table"],
+      "default": "any"
+    }
+  },
+  "required": []
+}

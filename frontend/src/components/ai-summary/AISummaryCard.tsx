@@ -4,17 +4,18 @@ import { useState } from "react";
 import {
   ArrowRight,
   FileText,
-  BadgeCheck,
   TriangleAlert,
-  Clock3,
   History,
-  ShieldCheck,
   RefreshCw,
   ExternalLink,
   Sparkles,
   Clock,
-  ChevronDown,
   Search,
+  CalendarDays,
+  ShieldCheck,
+  BadgeCheck,
+  Clock3,
+  LayoutList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TitleStatusPanel } from "./TitleStatusPanel";
@@ -22,7 +23,12 @@ import { SummarySection } from "./SummarySection";
 import { KeyDetailsPanel, visibleKeyDetailRows } from "./KeyDetailsPanel";
 import { ResearchModal } from "@/components/research/ResearchModal";
 import { cn } from "@/lib/utils";
-import type { ConfidenceLevel, DashboardCardItem } from "@/lib/types";
+import type {
+  ConfidenceLevel,
+  DashboardCardItem,
+  DueTone,
+  UrgencyLevel,
+} from "@/lib/types";
 
 interface AISummaryCardProps {
   item: DashboardCardItem;
@@ -45,6 +51,9 @@ export function AISummaryCard({
   onRegenerate,
   isRegenerating,
 }: AISummaryCardProps) {
+  const [summaryOpen, setSummaryOpen] = useState(true);
+  const [blockersOpen, setBlockersOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
 
@@ -64,91 +73,98 @@ export function AISummaryCard({
 
   return (
     <>
-    <article
-      // The card fills its grid cell (no hard-coded width) so it never floats
-      // or fights the row layout. Expanding Key Details grows the card's height
-      // in-flow; the parent grid lets an expanded card claim more row width.
-      className="relative grid gap-3.5 p-4 rounded-[24px] border border-slate-700/40 bg-gradient-to-b from-[#0c1220] to-[#080d18] shadow-[0_20px_54px_rgba(3,8,18,0.34)] w-full min-w-0 transition-[grid-column] duration-200"
-    >
-      {/* Header */}
-      <header className="flex items-center gap-3 flex-wrap">
-        <div className="w-[34px] h-[34px] rounded-full flex items-center justify-center bg-cyan-950/40 border border-cyan-700/20 shrink-0">
-          <Sparkles className="w-4 h-4 text-cyan-400" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-lg font-extrabold tracking-tight leading-none">
-            Item Summary
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Item ID: #{item.id || "—"}
-          </p>
-        </div>
-        {/* Regenerate sits directly next to the title (left-anchored). */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRegenerate}
-          disabled={isRegenerating}
-          className="rounded-full border-cyan-600/35 bg-slate-900/80 text-cyan-300 hover:border-cyan-400/55 hover:bg-slate-800 text-xs font-bold tracking-wide"
-        >
-          <RefreshCw
-            className={`w-3.5 h-3.5 ${isRegenerating ? "animate-spin" : ""}`}
-          />
-          Regenerate
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setResearchOpen(true)}
-          disabled={isRegenerating}
-          className="rounded-full border-violet-600/35 bg-slate-900/80 text-violet-300 hover:border-violet-400/55 hover:bg-slate-800 text-xs font-bold tracking-wide"
-        >
-          <Search className="w-3.5 h-3.5" />
-          Research
-        </Button>
-        {generatedLabel && (
-          <p className="text-xs text-slate-400 flex items-center gap-1.5 whitespace-nowrap ml-auto">
-            <Clock className="w-3.5 h-3.5" />
-            {generatedLabel}
-          </p>
-        )}
-      </header>
+      <article className="relative grid gap-4 p-5 rounded-[24px] border border-slate-700/40 bg-gradient-to-b from-[#0c1220] to-[#080d18] shadow-[0_20px_54px_rgba(3,8,18,0.34)] w-full min-w-0">
+        {/* Header */}
+        <header className="flex items-center gap-3 flex-wrap">
+          <div className="w-[34px] h-[34px] rounded-full flex items-center justify-center bg-cyan-950/40 border border-cyan-700/20 shrink-0">
+            <Sparkles className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-lg font-extrabold tracking-tight leading-none">
+              Item Summary
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Item ID: #{item.id || "—"}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRegenerate}
+            disabled={isRegenerating}
+            className="rounded-full border-cyan-600/35 bg-slate-900/80 text-cyan-300 hover:border-cyan-400/55 hover:bg-slate-800 text-xs font-bold tracking-wide"
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 ${isRegenerating ? "animate-spin" : ""}`}
+            />
+            Regenerate
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setResearchOpen(true)}
+            disabled={isRegenerating}
+            className="rounded-full border-violet-600/35 bg-slate-900/80 text-violet-300 hover:border-violet-400/55 hover:bg-slate-800 text-xs font-bold tracking-wide"
+          >
+            <Search className="w-3.5 h-3.5" />
+            Research
+          </Button>
+          {generatedLabel && (
+            <p className="text-xs text-slate-400 flex items-center gap-1.5 whitespace-nowrap ml-auto">
+              <Clock className="w-3.5 h-3.5" />
+              {generatedLabel}
+            </p>
+          )}
+        </header>
 
-      {/* Body: a single column of fixed-size content sections. These never
-          shrink — expanding Key Details adds a full-width section below. */}
-      <div className="grid gap-2 min-w-0">
+        {/* Title + status pills */}
         <TitleStatusPanel item={item} />
 
-          {item.nextAction && (
-            <SummarySection kind="next-action" label="Next Action" icon={ArrowRight}>
-              <p className="text-sm text-slate-300 leading-relaxed">
-                {item.nextAction}
-              </p>
-            </SummarySection>
-          )}
-          {item.summary && (
-            <SummarySection kind="summary" label="Summary" icon={FileText}>
-              <p className="text-sm text-slate-300 leading-relaxed">
-                {item.summary}
-              </p>
-            </SummarySection>
-          )}
-          {item.deliverable && (
-            <SummarySection
-              kind="deliverable"
-              label="Deliverable"
-              icon={BadgeCheck}
-            >
-              <p className="text-sm text-slate-300 leading-relaxed">
-                {item.deliverable}
-              </p>
-            </SummarySection>
-          )}
+        {/* Two-column body: only What to Do Now + Summary sit alongside Quick Facts */}
+        <div className="grid grid-cols-[1fr_200px] gap-4 min-w-0 items-start">
+          <div className="grid gap-2 min-w-0">
+            {item.nextAction && (
+              <SummarySection
+                kind="next-action"
+                label="What to Do Now"
+                icon={ArrowRight}
+              >
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  {item.nextAction}
+                </p>
+              </SummarySection>
+            )}
+
+            {item.summary && (
+              <SummarySection
+                kind="summary"
+                label="Summary"
+                icon={FileText}
+                collapsible
+                isOpen={summaryOpen}
+                onToggle={() => setSummaryOpen((v) => !v)}
+              >
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  {item.summary}
+                </p>
+              </SummarySection>
+            )}
+          </div>
+
+          {/* Right: Quick Facts */}
+          <QuickFacts item={item} />
+        </div>
+
+        {/* Full-width sections below the two-column area */}
+        <div className="grid gap-2 min-w-0">
           {item.blockersOpenQuestions.length > 0 && (
             <SummarySection
               kind="blockers"
               label="Blockers / Open Questions"
               icon={TriangleAlert}
+              collapsible
+              isOpen={blockersOpen}
+              onToggle={() => setBlockersOpen((v) => !v)}
             >
               <ul className="mt-1 space-y-1 text-sm text-slate-300 list-disc list-inside leading-relaxed">
                 {item.blockersOpenQuestions.map((b, i) => (
@@ -157,113 +173,203 @@ export function AISummaryCard({
               </ul>
             </SummarySection>
           )}
-          {item.urgencyText && (
-            <SummarySection kind="urgency" label="Urgency" icon={Clock3}>
-              <p className="text-sm text-slate-300 leading-relaxed">
-                {item.urgencyText}
-              </p>
-            </SummarySection>
-          )}
+
           {item.requestHistorySignals && (
             <SummarySection
               kind="history"
               label="Request History Signals"
               icon={History}
+              collapsible
+              isOpen={historyOpen}
+              onToggle={() => setHistoryOpen((v) => !v)}
             >
               <p className="text-sm text-slate-300 leading-relaxed">
                 {item.requestHistorySignals}
               </p>
             </SummarySection>
           )}
-          {(item.confidence.level || item.confidence.reason) && (
+
+          {hasKeyDetails && (
             <SummarySection
-              kind="confidence"
-              label="Confidence"
-              icon={ShieldCheck}
-              headingRight={
-                item.confidence.level ? (
-                  <ConfidencePill level={item.confidence.level} />
-                ) : undefined
-              }
+              kind="details"
+              label={`Key Details (${detailFieldCount} field${detailFieldCount !== 1 ? "s" : ""})`}
+              icon={LayoutList}
+              collapsible
+              isOpen={detailsOpen}
+              onToggle={() => setDetailsOpen((v) => !v)}
             >
-              {item.confidence.reason && (
-                <p className="text-sm text-slate-300 leading-relaxed">
-                  {item.confidence.reason}
-                </p>
-              )}
+              <KeyDetailsPanel rows={item.keyDetails} />
             </SummarySection>
           )}
-      </div>
+        </div>
 
-      {/* Persistent KEY DETAILS toggle bar — always full-width at the bottom of
-          the card body. Chevron flips on expand/collapse; no separate button. */}
-      {hasKeyDetails && (
-        <button
-          type="button"
-          onClick={() => setDetailsOpen((v) => !v)}
-          aria-expanded={detailsOpen}
-          aria-label={detailsOpen ? "Collapse key details" : "Expand key details"}
-          className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-xl border border-slate-700/30 bg-slate-900/60 hover:bg-slate-800/70 transition-colors"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-[0.72rem] font-extrabold tracking-widest uppercase text-cyan-400">
-              Key Details
-            </span>
-            <span className="text-[0.7rem] text-slate-500">
-              ({detailFieldCount} field{detailFieldCount !== 1 ? "s" : ""})
-            </span>
-          </div>
-          <ChevronDown
-            className={cn(
-              "w-4 h-4 text-cyan-400 transition-transform shrink-0",
-              detailsOpen && "rotate-180"
-            )}
-          />
-        </button>
-      )}
+        <footer className="flex items-center gap-3 flex-wrap pt-2.5 border-t border-slate-700/25">
+          {item.href && (
+            <a
+              href={item.href}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-cyan-300 border border-cyan-600/40 bg-slate-800/90 hover:border-cyan-400/60 hover:bg-slate-700/80 transition-colors"
+            >
+              View Full Request
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+          {footerText && (
+            <p className="text-xs text-slate-500 ml-auto">{footerText}</p>
+          )}
+        </footer>
+      </article>
 
-      {/* Table: only mounted when expanded; card grows in height naturally. */}
-      {hasKeyDetails && detailsOpen && (
-        <KeyDetailsPanel rows={item.keyDetails} />
-      )}
-
-      <footer className="flex items-center gap-3 flex-wrap pt-2.5 border-t border-slate-700/25">
-        {item.href && (
-          <a
-            href={item.href}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold text-cyan-300 border border-cyan-600/30 bg-slate-900/80 hover:border-cyan-400/50 transition-colors"
-          >
-            View Full Request
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
-        )}
-        {footerText && <p className="text-xs text-slate-500">{footerText}</p>}
-      </footer>
-    </article>
-
-    <ResearchModal
-      open={researchOpen}
-      onClose={() => setResearchOpen(false)}
-      item={item}
-    />
+      <ResearchModal
+        open={researchOpen}
+        onClose={() => setResearchOpen(false)}
+        item={item}
+      />
     </>
   );
 }
 
-function ConfidencePill({ level }: { level: ConfidenceLevel }) {
-  const cls =
-    level === "High"
-      ? "text-green-400 border-green-600/30 bg-green-950/30"
-      : level === "Medium"
-        ? "text-yellow-400 border-yellow-600/30 bg-yellow-950/30"
-        : "text-red-400 border-red-600/30 bg-red-950/30";
+// ─── Quick Facts sidebar ──────────────────────────────────────────────────────
+
+const DUE_TONE_CLS: Record<DueTone, string> = {
+  soon: "text-cyan-400 border-cyan-600/30 bg-cyan-950/30",
+  overdue: "text-red-400 border-red-600/30 bg-red-950/30",
+  normal: "text-slate-300 border-slate-600/30 bg-slate-800/30",
+  unknown: "text-slate-500 border-slate-700/30 bg-transparent",
+};
+
+const URGENCY_CLS: Record<UrgencyLevel, string> = {
+  critical: "text-red-400 border-red-600/30 bg-red-950/30",
+  high: "text-amber-400 border-amber-600/30 bg-amber-950/30",
+  normal: "text-slate-400 border-slate-600/30 bg-slate-800/30",
+  low: "text-green-400 border-green-600/30 bg-green-950/30",
+};
+
+const URGENCY_LABEL: Record<UrgencyLevel, string> = {
+  critical: "Critical",
+  high: "High",
+  normal: "Normal",
+  low: "Low",
+};
+
+const CONFIDENCE_CLS: Record<ConfidenceLevel, string> = {
+  High: "text-green-400 border-green-600/30 bg-green-950/30",
+  Medium: "text-yellow-400 border-yellow-600/30 bg-yellow-950/30",
+  Low: "text-red-400 border-red-600/30 bg-red-950/30",
+  "": "text-slate-400 border-slate-600/30 bg-transparent",
+};
+
+function QuickFacts({ item }: { item: DashboardCardItem }) {
   return (
-    <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-extrabold border ${cls}`}
-    >
-      {level}
-    </span>
+    <div className="rounded-2xl border border-slate-700/30 bg-slate-900/60 p-3.5 flex flex-col gap-3">
+      <p className="text-[0.65rem] font-extrabold tracking-widest uppercase text-slate-500">
+        Quick Facts
+      </p>
+
+      {item.due.date && (
+        <QuickFactRow icon={CalendarDays} label="Due Date" iconCls="bg-slate-800/60 text-slate-300">
+          <p className="text-sm font-semibold text-slate-200 leading-snug">
+            {item.due.date}
+          </p>
+          {item.due.relative && (
+            <span
+              className={cn(
+                "mt-1 inline-flex text-[0.65rem] font-bold px-2 py-0.5 rounded-full border",
+                DUE_TONE_CLS[item.due.tone]
+              )}
+            >
+              {item.due.relative}
+            </span>
+          )}
+        </QuickFactRow>
+      )}
+
+      {item.confidence.level && (
+        <QuickFactRow
+          icon={ShieldCheck}
+          label="Confidence"
+          iconCls="bg-green-950/30 text-green-400"
+          badge={
+            <span
+              className={cn(
+                "text-[0.65rem] font-extrabold px-2 py-0.5 rounded-full border",
+                CONFIDENCE_CLS[item.confidence.level]
+              )}
+            >
+              {item.confidence.level}
+            </span>
+          }
+        >
+          {null}
+        </QuickFactRow>
+      )}
+
+      {item.deliverable && (
+        <QuickFactRow icon={BadgeCheck} label="Deliverable" iconCls="bg-green-950/30 text-green-400">
+          <p className="text-xs text-slate-300 leading-snug">{item.deliverable}</p>
+        </QuickFactRow>
+      )}
+
+      {(item.urgencyText || item.urgency) && (
+        <QuickFactRow
+          icon={Clock3}
+          label="Urgency"
+          iconCls="bg-amber-950/30 text-amber-400"
+          badge={
+            <span
+              className={cn(
+                "text-[0.65rem] font-extrabold px-2 py-0.5 rounded-full border",
+                URGENCY_CLS[item.urgency]
+              )}
+            >
+              {URGENCY_LABEL[item.urgency]}
+            </span>
+          }
+        >
+          {item.urgencyText && (
+            <p className="text-xs text-slate-300 leading-snug mt-0.5">
+              {item.urgencyText}
+            </p>
+          )}
+        </QuickFactRow>
+      )}
+    </div>
+  );
+}
+
+function QuickFactRow({
+  icon: Icon,
+  label,
+  iconCls,
+  badge,
+  children,
+}: {
+  icon: typeof CalendarDays;
+  label: string;
+  iconCls: string;
+  badge?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <div
+        className={cn(
+          "w-7 h-7 rounded-full flex items-center justify-center border border-white/8 shrink-0 mt-0.5",
+          iconCls
+        )}
+      >
+        <Icon className="w-3.5 h-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-1 mb-0.5">
+          <p className="text-[0.65rem] font-bold tracking-widest uppercase text-slate-500">
+            {label}
+          </p>
+          {badge}
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
