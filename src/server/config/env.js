@@ -64,12 +64,17 @@ export function buildConfig(overrides = {}) {
     openAiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
     openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
 
+    // Sourcebot
+    sourcebotHost:   process.env.SOURCEBOT_HOST    || "",
+    sourcebotApiKey: process.env.SOURCEBOT_API_KEY || "",
+
     // Microsoft Graph / Azure AD
-    graphTenantId:     process.env.GRAPH_TENANT_ID     || "",
-    graphClientId:     process.env.GRAPH_CLIENT_ID     || "",
-    graphClientSecret: process.env.GRAPH_CLIENT_SECRET || "",
-    graphRedirectUri:  process.env.GRAPH_REDIRECT_URI  || "http://localhost:3069/auth/redirect",
-    graphScopes:       (process.env.GRAPH_SCOPES || "User.Read Mail.Read Calendars.Read offline_access").split(" ").filter(Boolean)
+    graphTenantId:      process.env.GRAPH_TENANT_ID      || "",
+    graphClientId:      process.env.GRAPH_CLIENT_ID      || "",
+    graphClientSecret:  process.env.GRAPH_CLIENT_SECRET  || "",
+    graphRedirectUri:   process.env.GRAPH_REDIRECT_URI   || "http://localhost:3069/auth/redirect",
+    graphScopes:        (process.env.GRAPH_SCOPES || "User.Read Mail.Read Calendars.Read offline_access").split(" ").filter(Boolean),
+    graphTokenCacheFile: process.env.GRAPH_TOKEN_CACHE_FILE || ".local-auth/graph-tester-token.json"
   };
 
   return { ...baseConfig, ...overrides };

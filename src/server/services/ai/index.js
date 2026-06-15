@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { createAskService } from "./ask.js";
 import { createDisabledSummarizer } from "./disabledSummarizer.js";
 import { createPortalParser } from "./portalParser.js";
+import { createEmailContextSummarizer } from "./emailContextSummarizer.js";
 
 export function createSummarizer(config) {
   if (!config.openAiEnabled || !config.openAiApiKey) {
@@ -39,6 +40,7 @@ export function createSummarizer(config) {
 
 export { createPortalParser };
 export { createAskService };
+export { createEmailContextSummarizer };
 
 function buildInstructions(focus) {
   const focusLine = normalizeFocus(focus)

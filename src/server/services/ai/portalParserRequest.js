@@ -127,6 +127,7 @@ const SYSTEM_PROMPT = [
   "The title must be a concise case title, not a sentence, and must not start with the requester's name.",
   "Preserve important exact terms such as system names, report names, reference values, IDs, and field names.",
   "Use request history only when it adds new context, blockers, or investigation progress.",
+  "Email Context, when present, contains the most recent email in the item's thread and may include follow-up details, service team notes, or requester updates not visible in the portal record — incorporate this context into the summary, next action, blockers, and key details as appropriate.",
   "Identify urgency only from visible evidence such as due date, request age, priority, SLA warnings, elapsed-time messages, status, or queue indicators.",
   "If something is unclear or missing, say so briefly.",
   `Return valid JSON only. For each item, include keyDetails using this fixed label set in this exact order: ${KEY_DETAIL_LABELS.join(", ")}.`,

@@ -44,3 +44,4 @@ export * as mailboxSettingsService from "./services/mailboxSettingsService.js";
 export * as teamsChatService      from "./services/teamsChatService.js";
 export * as teamsChannelService   from "./services/teamsChannelService.js";
 export * as peopleService         from "./services/peopleService.js";
+export * as itemEmailService      from "./services/itemEmailService.js";

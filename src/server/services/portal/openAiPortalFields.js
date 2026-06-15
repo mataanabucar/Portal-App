@@ -9,7 +9,8 @@ const FIELD_SPECS = [
   ["Business", "business"],
   ["IssueItem", "issueItem"],
   ["Detail", "detail"],
-  ["Request History", "requestHistory"]
+  ["Request History", "requestHistory"],
+  ["Email Context", "emailContext"],
 ];
 
 export function buildOpenAiPortalPayload(records) {
@@ -35,6 +36,10 @@ function hasOpenAiFieldValue(record) {
 function normalizeFieldValue(value, field) {
   if (field === "detail") {
     return clipText(value, 1200);
+  }
+
+  if (field === "emailContext") {
+    return clipText(value, 2500);
   }
 
   return normalizeText(value);

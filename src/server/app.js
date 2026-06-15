@@ -16,13 +16,16 @@ import {
   normalizeTesterConfig,
   parseTesterConfigQuery
 } from "./services/testerConfig.js";
+import { findItemEmail } from "./services/graph/services/itemEmailService.js";
+import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
+import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
 const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, sourcebotService }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -56,7 +59,8 @@ export function createApp({ config, portalService, summarizer, parser, asker }) 
               portal: runtimePortalService.describe(),
               summarizer: runtimeSummarizer.describe(),
               parser: runtimeParser.describe(),
-              ask: runtimeAsker.describe()
+              ask: runtimeAsker.describe(),
+              sourcebot: sourcebotService?.describe() ?? { enabled: false }
             },
             testing: {
               usingTesterConfig
@@ -143,6 +147,8 @@ export function createApp({ config, portalService, summarizer, parser, asker }) 
           const payload = await buildParserPayload({
             portalService: runtimePortalService,
             parser: runtimeParser,
+            graphAuth,
+            emailContextSummarizer,
             focus: request.body?.focus,
             testchat: request.body?.testchat === true,
             model: request.body?.model
@@ -213,6 +219,8 @@ export function createApp({ config, portalService, summarizer, parser, asker }) 
             portalService: runtimePortalService,
             summarizer: runtimeSummarizer,
             parser: runtimeParser,
+            graphAuth,
+            emailContextSummarizer,
             includeSummary: request.body?.includeSummary !== false,
             focus: request.body?.focus,
             parserFocus: request.body?.parserFocus,
@@ -224,6 +232,57 @@ export function createApp({ config, portalService, summarizer, parser, asker }) 
         }
       );
     } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/item/email", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      const { requestId, relatedActionItem } = request.body || {};
+      const email = await findItemEmail(token, { requestId, relatedActionItem });
+      response.json({ ok: true, email });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/item/research", async (request, response, next) => {
+    try {
+      if (!sourcebotService?.enabled) {
+        response.status(503).json({ ok: false, error: "Sourcebot is not configured." });
+        return;
+      }
+
+      const { query, messages = [], itemContext = "" } = request.body || {};
+      if (!query || typeof query !== "string" || !query.trim()) {
+        response.status(400).json({ ok: false, error: "query is required." });
+        return;
+      }
+
+      const result = await runResearchPipeline({
+        sourcebotService,
+        config,
+        itemContext,
+        userQuery: query.trim(),
+        messages,
+      });
+
+      response.json({ ok: true, answer: result.answer, chatUrl: result.chatUrl, retrievalTrail: result.retrievalTrail });
+    } catch (error) {
+      console.error("[/api/item/research]", error);
       next(error);
     }
   });
@@ -292,11 +351,14 @@ async function buildPreviewPayload({
 async function buildParserPayload({
   portalService,
   parser,
+  graphAuth,
+  emailContextSummarizer,
   focus,
   testchat,
   model
 }) {
   const snapshot = await portalService.fetchSnapshot();
+  await tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot);
   const parsed = await parser.parseSnapshot(snapshot, {
     focus,
     testchat,
@@ -319,6 +381,8 @@ async function buildDashboardPayload({
   portalService,
   summarizer,
   parser,
+  graphAuth,
+  emailContextSummarizer,
   includeSummary,
   focus,
   parserFocus,
@@ -326,6 +390,7 @@ async function buildDashboardPayload({
   model
 }) {
   const snapshot = await portalService.fetchSnapshot();
+  await tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot);
   const [summary, parsed] = await Promise.all([
     includeSummary ? summarizer.summarize(snapshot, focus) : Promise.resolve(null),
     parser.parseSnapshot(snapshot, {
@@ -344,4 +409,20 @@ async function buildDashboardPayload({
 
 function normalizeAskPrompt(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+
+async function tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot) {
+  if (!graphAuth || !Array.isArray(snapshot?.records)) return;
+  try {
+    const token = await graphAuth.getAccessToken();
+    const before = snapshot.records.length;
+    snapshot.records = await enrichRecordsWithEmail(token, snapshot.records, {
+      summarize: emailContextSummarizer?.summarize.bind(emailContextSummarizer),
+    });
+    const enriched = snapshot.records.filter((r) => r.emailContext).length;
+    console.log(`[email-enrichment] ${enriched}/${before} records enriched with email context`);
+  } catch (error) {
+    console.warn("[email-enrichment] skipped:", error.message);
+  }
 }

@@ -1,8 +1,10 @@
 import { app, BrowserWindow, dialog, shell } from "electron";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 const initialWorkingDirectory = process.cwd();
 const currentFile = fileURLToPath(import.meta.url);
@@ -15,6 +17,8 @@ const bootstrapLogPath = path.join(
 
 let mainWindow = null;
 let serverHandle = null;
+let frontendProcess = null;
+let frontendPort = 0; // assigned dynamically (a free port) before spawning Next.js
 let startServer = null;
 let isQuitting = false;
 let desktopLogPath = "";
@@ -71,6 +75,7 @@ app.on("activate", async () => {
 app.on("before-quit", () => {
   isQuitting = true;
   void stopServer();
+  stopFrontend();
 });
 
 app.on("window-all-closed", () => {
@@ -85,7 +90,7 @@ async function createMainWindow() {
   }
 
   if (!serverHandle) {
-    logDesktop("Starting embedded server.");
+    logDesktop("Starting embedded Express server.");
     serverHandle = startServer({
       host: "127.0.0.1",
       port: 0,
@@ -95,11 +100,28 @@ async function createMainWindow() {
       )
     });
     await serverHandle.ready;
-    logDesktop(`Embedded server ready on port ${getServerPort(serverHandle)}.`);
+    logDesktop(`Express server ready on port ${getServerPort(serverHandle)}.`);
   }
 
-  const port = getServerPort(serverHandle);
-  const appOrigin = `http://127.0.0.1:${port}`;
+  const expressPort = getServerPort(serverHandle);
+  const backendUrl = `http://127.0.0.1:${expressPort}`;
+
+  if (!frontendProcess) {
+    // Pick a fresh free port each launch so a stale/orphaned Next.js process
+    // from a previous run can never cause an EADDRINUSE collision.
+    frontendPort = await findFreePort();
+    logDesktop(`Starting Next.js frontend on free port ${frontendPort}.`);
+    frontendProcess = spawnFrontend(expressPort, frontendPort);
+  }
+
+  const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+
+  logDesktop(`Waiting for Next.js to be ready at ${frontendUrl}…`);
+  const ready = await waitForPort(frontendPort);
+  if (!ready) {
+    throw new Error(`Next.js did not become ready on port ${frontendPort} in time.`);
+  }
+  logDesktop("Next.js ready.");
 
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -132,7 +154,7 @@ async function createMainWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith(appOrigin)) {
+    if (url.startsWith(frontendUrl) || url.startsWith(backendUrl)) {
       return { action: "allow" };
     }
 
@@ -141,7 +163,7 @@ async function createMainWindow() {
   });
 
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (url.startsWith(appOrigin)) {
+    if (url.startsWith(frontendUrl) || url.startsWith(backendUrl)) {
       return;
     }
 
@@ -149,9 +171,107 @@ async function createMainWindow() {
     void shell.openExternal(url);
   });
 
-  logDesktop(`Loading desktop origin ${appOrigin}.`);
-  await mainWindow.loadURL(appOrigin);
-  logDesktop("Desktop origin loaded.");
+  logDesktop(`Loading ${frontendUrl}`);
+  await mainWindow.loadURL(frontendUrl);
+  logDesktop("Frontend loaded.");
+}
+
+function resolveFrontendDir() {
+  if (!app.isPackaged) return path.join(projectRoot, "frontend");
+  // exe lives at dist/win-unpacked/<name>.exe — go up two dirs to project root
+  return path.join(path.dirname(app.getPath("exe")), "..", "..", "frontend");
+}
+
+function spawnFrontend(expressPort, port) {
+  const subcommand = app.isPackaged ? "start" : "dev";
+  const frontendDir = resolveFrontendDir();
+  const nextBin = path.join(
+    frontendDir,
+    "node_modules",
+    "next",
+    "dist",
+    "bin",
+    "next"
+  );
+  logDesktop(`Frontend dir: ${frontendDir}`);
+  logDesktop(`Next bin: ${nextBin}`);
+
+  // Run the Next.js CLI directly with Electron's bundled Node runtime
+  // (ELECTRON_RUN_AS_NODE makes the current executable behave as `node`).
+  // Benefits over spawning `npm.cmd`:
+  //   * no dependency on a system Node/npm install,
+  //   * no shell wrapper — so child.kill() terminates the real process and we
+  //     never orphan a Next.js server that would hold the port on relaunch.
+  const child = spawn(
+    process.execPath,
+    [nextBin, subcommand, "-p", String(port)],
+    {
+      cwd: frontendDir,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        BACKEND_URL: `http://127.0.0.1:${expressPort}`,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+
+  child.stdout.on("data", (chunk) => logDesktop(`[next] ${chunk.toString().trimEnd()}`));
+  child.stderr.on("data", (chunk) => logDesktop(`[next:err] ${chunk.toString().trimEnd()}`));
+
+  child.on("exit", (code, signal) => {
+    logDesktop(`Next.js process exited (code=${code}, signal=${signal})`);
+    frontendProcess = null;
+    if (!isQuitting) {
+      logDesktop("Unexpected Next.js exit — quitting app.");
+      app.quit();
+    }
+  });
+
+  return child;
+}
+
+function stopFrontend() {
+  if (!frontendProcess) return;
+  const child = frontendProcess;
+  frontendProcess = null;
+  logDesktop("Stopping Next.js process.");
+  try {
+    child.kill();
+  } catch { /* ignore */ }
+}
+
+function findFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function waitForPort(port, timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const open = await isPortOpen(port);
+    if (open) return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+function isPortOpen(port) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(400);
+    socket.once("connect", () => { socket.destroy(); resolve(true); });
+    socket.once("error", () => { socket.destroy(); resolve(false); });
+    socket.once("timeout", () => { socket.destroy(); resolve(false); });
+    socket.connect(port, "127.0.0.1");
+  });
 }
 
 function prepareDesktopEnvironment() {
@@ -206,7 +326,7 @@ async function stopServer() {
   const handle = serverHandle;
   serverHandle = null;
 
-  logDesktop("Stopping embedded server.");
+  logDesktop("Stopping embedded Express server.");
   await handle.dispose();
   await new Promise((resolve, reject) => {
     handle.server.close((error) => {
