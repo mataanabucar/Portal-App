@@ -18,6 +18,7 @@ export function createTeamGptAuthService(config) {
   let cachedToken = readCachedToken(cacheFile);
   let authPage = null;
   let sessionPromise = null;
+  let sessionMode = "";
   let disposed = false;
 
   return {
@@ -36,76 +37,30 @@ export function createTeamGptAuthService(config) {
         return { jwtToken: cachedToken.jwtToken, pageUrl: cachedToken.pageUrl };
       }
 
-      for (let attempt = 0; attempt < 2; attempt += 1) {
-        const session = await getSession();
-        let page = null;
-        let keepOpen = false;
-
-        try {
-          page = await session.context.newPage();
-          page.setDefaultNavigationTimeout(config.playwrightNavigationTimeoutMs);
-          await page.bringToFront().catch(() => undefined);
-          await page.goto(resolveTeamGptPageUrl(config), {
-            waitUntil: "domcontentloaded",
-            timeout: config.playwrightNavigationTimeoutMs
-          });
-
-          await page
-            .waitForLoadState("networkidle", {
-              timeout: config.playwrightNavigationTimeoutMs
-            })
-            .catch(() => undefined);
-
-          const html = await page.content();
-          const finalUrl = page.url();
-
-          if (isMicrosoftLoginPage({ url: finalUrl, html })) {
-            keepOpen = true;
-            authPage = page;
-            await closeSiblingBlankPages(session.context, page);
-            await page.bringToFront().catch(() => undefined);
-
-            throw new Error(
-              "Browser session reached the TeamGPT sign-in page. Complete sign-in in the opened browser window, then retry."
-            );
-          }
-
-          const jwtToken = await waitForJwtToken(page, config.playwrightNavigationTimeoutMs);
-
-          if (!jwtToken) {
-            throw new Error(
-              "TeamGPT page loaded, but no JWT token was found on the page."
-            );
-          }
-
-          if (authPage && authPage !== page) {
-            await closePage(authPage);
-            authPage = null;
-          }
-
-          const savedAt = new Date().toISOString();
-          cachedToken = { jwtToken, pageUrl: finalUrl, savedAt };
-          writeCachedToken(cacheFile, cachedToken);
-          return { jwtToken, pageUrl: finalUrl };
-        } catch (error) {
-          if (!keepOpen && authPage === page) {
-            authPage = null;
-          }
-
-          if (shouldRecreateSession(error) && attempt === 0) {
-            await resetSession();
-            continue;
-          }
-
-          throw error;
-        } finally {
-          if (!keepOpen) {
-            await closePage(page);
-          }
-        }
+      if (hasInteractiveSession()) {
+        return fetchJwtToken({
+          headless: false,
+          interactive: true
+        });
       }
 
-      throw new Error("TeamGPT auth fetch failed unexpectedly.");
+      if (!config.playwrightConnectToExisting) {
+        const backgroundToken = await fetchJwtToken({
+          headless: true,
+          interactive: false
+        });
+
+        if (backgroundToken) {
+          return backgroundToken;
+        }
+
+        await resetSession();
+      }
+
+      return fetchJwtToken({
+        headless: false,
+        interactive: true
+      });
     },
 
     async dispose() {
@@ -120,17 +75,33 @@ export function createTeamGptAuthService(config) {
     }
   };
 
-  async function getSession() {
+  async function getSession({ headless }) {
+    const nextSessionMode = config.playwrightConnectToExisting
+      ? "connected"
+      : headless
+        ? "headless"
+        : "interactive";
+
+    if (sessionPromise && sessionMode && sessionMode !== nextSessionMode) {
+      await resetSession();
+    }
+
     if (sessionPromise) {
       return sessionPromise;
     }
 
-    sessionPromise = createTrackedSession(config);
+    sessionMode = nextSessionMode;
+    sessionPromise = createTrackedSession(
+      config.playwrightConnectToExisting
+        ? config
+        : { ...config, playwrightHeadless: headless }
+    );
     return sessionPromise;
   }
 
   async function resetSession() {
     authPage = null;
+    sessionMode = "";
 
     if (!sessionPromise) {
       return;
@@ -150,6 +121,7 @@ export function createTeamGptAuthService(config) {
         const clearSession = () => {
           if (sessionPromise === createdSessionPromise) {
             sessionPromise = null;
+            sessionMode = "";
           }
 
           authPage = null;
@@ -164,10 +136,92 @@ export function createTeamGptAuthService(config) {
       .catch(() => {
         if (sessionPromise === createdSessionPromise) {
           sessionPromise = null;
+          sessionMode = "";
         }
       });
 
     return createdSessionPromise;
+  }
+
+  function hasInteractiveSession() {
+    return Boolean(authPage) || (Boolean(sessionPromise) && sessionMode === "interactive");
+  }
+
+  async function fetchJwtToken({ headless, interactive }) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const session = await getSession({ headless });
+      let page = null;
+      let keepOpen = false;
+
+      try {
+        page = await session.context.newPage();
+        page.setDefaultNavigationTimeout(config.playwrightNavigationTimeoutMs);
+        await page.bringToFront().catch(() => undefined);
+        await page.goto(resolveTeamGptPageUrl(config), {
+          waitUntil: "domcontentloaded",
+          timeout: config.playwrightNavigationTimeoutMs
+        });
+
+        await page
+          .waitForLoadState("networkidle", {
+            timeout: config.playwrightNavigationTimeoutMs
+          })
+          .catch(() => undefined);
+
+        const html = await page.content();
+        const finalUrl = page.url();
+
+        if (isMicrosoftLoginPage({ url: finalUrl, html })) {
+          if (!interactive) {
+            return null;
+          }
+
+          keepOpen = true;
+          authPage = page;
+          await closeSiblingBlankPages(session.context, page);
+          await page.bringToFront().catch(() => undefined);
+
+          throw new Error(
+            "Browser session reached the TeamGPT sign-in page. Complete sign-in in the opened browser window, then retry."
+          );
+        }
+
+        const jwtToken = await waitForJwtToken(page, config.playwrightNavigationTimeoutMs);
+
+        if (!jwtToken) {
+          throw new Error(
+            "TeamGPT page loaded, but no JWT token was found on the page."
+          );
+        }
+
+        if (authPage && authPage !== page) {
+          await closePage(authPage);
+          authPage = null;
+        }
+
+        const savedAt = new Date().toISOString();
+        cachedToken = { jwtToken, pageUrl: finalUrl, savedAt };
+        writeCachedToken(cacheFile, cachedToken);
+        return { jwtToken, pageUrl: finalUrl };
+      } catch (error) {
+        if (!keepOpen && authPage === page) {
+          authPage = null;
+        }
+
+        if (shouldRecreateSession(error) && attempt === 0) {
+          await resetSession();
+          continue;
+        }
+
+        throw error;
+      } finally {
+        if (!keepOpen) {
+          await closePage(page);
+        }
+      }
+    }
+
+    throw new Error("TeamGPT auth fetch failed unexpectedly.");
   }
 }
 

@@ -137,10 +137,10 @@ async function runMockScenario() {
       parser.snapshot.recordCount === 3 && parser.parser.mode === "testchat"
     );
     console.log(
-      "Parser request cached:",
-      parser.parser.request?.input === parser.parser.originalText &&
-        parser.parser.request?.store === false &&
-        !Object.prototype.hasOwnProperty.call(parser.parser.request, "text")
+      "Parser request removed from response:",
+      !Object.prototype.hasOwnProperty.call(parser.parser || {}, "request") &&
+        typeof parser.parser.originalText === "string" &&
+        parser.parser.originalText.length > 0
     );
     console.log(
       "Ask route OK:",
@@ -154,9 +154,10 @@ async function runMockScenario() {
         dashboard.parser.mode === "structured"
     );
     console.log(
-      "Dashboard parser request cached:",
-      dashboard.parser.request?.input === dashboard.parser.originalText &&
-        dashboard.parser.request?.text?.format?.type === "json_schema"
+      "Dashboard parser request removed from response:",
+      !Object.prototype.hasOwnProperty.call(dashboard.parser || {}, "request") &&
+        typeof dashboard.parser.originalText === "string" &&
+        dashboard.parser.originalText.length > 0
     );
     console.log(
       "Disabled parser fallback shape OK:",
@@ -229,27 +230,7 @@ async function runDashboardCachePersistenceScenario() {
       },
       parser: {
         mode: "structured",
-        request: {
-          model: "gpt-4.1-mini",
-          store: false,
-          instructions: "Test instructions",
-          input: "{\"Records\":[]}",
-          text: {
-            format: {
-              type: "json_schema",
-              name: "portal_visualizer_ai_summary_v1",
-              strict: true,
-              schema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  items: { type: "array", items: { type: "object" } }
-                },
-                required: ["items"]
-              }
-            }
-          }
-        },
+        originalText: "{\"Records\":[]}",
         parsed: {
           items: [
             {
@@ -355,7 +336,7 @@ async function runDashboardCachePersistenceScenario() {
       "Dashboard cache survives restart:",
       cachedDashboard?.payload?.snapshot?.recordCount === 1 &&
         cachedDashboard?.controls?.focus === "Tell me what matters today." &&
-        cachedDashboard?.payload?.parser?.request?.input ===
+        cachedDashboard?.payload?.parser?.originalText ===
           "{\"Records\":[]}" &&
         cachedDashboard?.payload?.snapshot?.records?.[0]?.href ===
           "https://portal.example.test/request/REQ-1"

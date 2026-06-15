@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, BrainCircuit, LayoutDashboard } from "lucide-react";
+import { BookOpen, LayoutDashboard } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Sidebar, type SidebarAction } from "@/components/layout/Sidebar";
 
@@ -21,13 +21,6 @@ export function AppSidebar({
       icon: LayoutDashboard,
       href: "/",
       active: pathname === "/",
-    },
-    {
-      id: "ai-trace",
-      label: "AI Trace",
-      icon: BrainCircuit,
-      href: "/ai-trace",
-      active: pathname === "/ai-trace",
     },
   ];
 

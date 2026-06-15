@@ -1,4 +1,5 @@
 import type {
+  DashboardCacheRecord,
   DashboardRequest,
   DashboardResponse,
   HealthResponse,
@@ -33,7 +34,9 @@ export const api = {
   health: () => get<HealthResponse>("/api/health"),
   dashboard: (req: DashboardRequest = {}) =>
     post<DashboardResponse>("/api/dashboard", req),
-  dashboardCache: () => get<DashboardResponse | null>("/api/dashboard/cache"),
+  dashboardCache: () => get<DashboardCacheRecord | null>("/api/dashboard/cache"),
+  saveDashboardCache: (payload: DashboardCacheRecord) =>
+    post<DashboardCacheRecord>("/api/dashboard/cache", payload),
   itemEmail: (req: ItemEmailRequest) =>
     post<{ ok: true; email: ItemEmailResult | null }>("/api/item/email", req),
   research: (req: ResearchRequest) =>

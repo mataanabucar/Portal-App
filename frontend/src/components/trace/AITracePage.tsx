@@ -9,10 +9,9 @@ import { useDashboard } from "@/hooks/useDashboard";
 import type { DashboardResponse, ParsedPortalItem, SummaryResult } from "@/lib/types";
 
 export function AITracePage() {
-  const { data, error, isLoading, refresh } = useDashboard({
+  const { data, error, isLoading, loadingProgress, loadingLabel, refresh } = useDashboard({
     includeSummary: true,
   });
-  const loadProgress = isLoading ? 68 : 100;
 
   return (
     <div className="flex min-h-screen">
@@ -69,8 +68,8 @@ export function AITracePage() {
           {isLoading && !data ? (
             <div className="flex min-h-[50vh] flex-col items-center justify-center">
               <PillProgress3D
-                progress={loadProgress}
-                label="LOADING AI TRACE..."
+                progress={loadingProgress}
+                label={loadingLabel}
                 width={420}
                 height={60}
               />
@@ -97,8 +96,6 @@ function AITraceContent({
 }) {
   const summary = data.summary;
   const parsedItems = data.parser.parsed?.items || [];
-  const parserResponseBody =
-    data.parser.mode === "structured" ? data.parser.parsed || null : data.parser.responseText || null;
 
   return (
     <>
@@ -121,7 +118,7 @@ function AITraceContent({
           accent="violet"
           icon={BrainCircuit}
           meta={[
-            `Provider: ${summary?.provider || summary?.request?.provider || "Unknown"}`,
+            `Provider: ${summary?.provider || summary?.trace?.provider || "Unknown"}`,
             `Focus: ${summary?.suggestedFocus || "General queue guidance"}`,
           ]}
         />
@@ -157,24 +154,24 @@ function AITraceContent({
           <TraceCard
             kicker="TeamGPT"
             title="What we sent for the queue brief"
-            eyebrow={summary?.request?.model || summary?.model || "Not captured"}
+            eyebrow={summary?.trace?.model || summary?.model || "Not captured"}
           >
             <TraceMetaGrid
               rows={[
-                ["Provider", summary?.request?.provider || summary?.provider || "Unknown"],
+                ["Provider", summary?.trace?.provider || summary?.provider || "Unknown"],
                 ["Focus", summary?.suggestedFocus || "General queue guidance"],
-                ["Input size", formatCount(summary?.request?.inputLength)],
-                ["Endpoint", summary?.request?.endpoint || "N/A for this provider"],
+                ["Input size", formatCount(summary?.trace?.inputLength)],
+                ["Endpoint", summary?.trace?.endpoint || "N/A for this provider"],
               ]}
             />
             <TraceTextBlock
               label="Instructions"
-              text={summary?.request?.instructions}
+              text={summary?.trace?.instructions}
               empty="This summary snapshot was captured before request tracing was added."
             />
             <TraceTextBlock
               label="Queue text sent to TeamGPT"
-              text={summary?.request?.input}
+              text={summary?.trace?.input}
               empty="No TeamGPT summary input was captured for this run."
               tone="muted"
             />
@@ -189,12 +186,6 @@ function AITraceContent({
           </TraceCard>
         </section>
 
-        <RawInspector
-          title="Raw TeamGPT summary payload"
-          subtitle="Exact TeamGPT summary request and response objects"
-          request={summary?.request || null}
-          response={summary || null}
-        />
       </ProviderSection>
 
       <ProviderSection
@@ -233,19 +224,13 @@ function AITraceContent({
               <ParsedItemsPreview items={parsedItems} />
             ) : (
               <HumanText
-                text={typeof parserResponseBody === "string" ? parserResponseBody : ""}
+                text={typeof data.parser.responseText === "string" ? data.parser.responseText : ""}
                 empty="No raw OpenAI parser response was returned."
               />
             )}
           </TraceCard>
         </section>
 
-        <RawInspector
-          title="Raw OpenAI parser payload"
-          subtitle="Exact OpenAI parser request and response objects"
-          request={data.parser.request}
-          response={parserResponseBody}
-        />
       </ProviderSection>
 
       <div className="flex justify-end">
@@ -526,46 +511,6 @@ function CompactField({ label, value }: { label: string; value?: string | null }
   );
 }
 
-function RawInspector({
-  title,
-  subtitle,
-  request,
-  response,
-}: {
-  title: string;
-  subtitle: string;
-  request: unknown;
-  response: unknown;
-}) {
-  return (
-    <article className="rounded-[26px] border border-slate-700/35 bg-slate-950/45 p-5 shadow-[0_16px_42px_rgba(2,8,24,0.18)]">
-      <p className="text-[0.72rem] font-extrabold uppercase tracking-[0.26em] text-slate-400">
-        Raw Inspector
-      </p>
-      <h2 className="mt-2 text-xl font-bold tracking-tight text-slate-100">{title}</h2>
-      <p className="mt-2 text-sm leading-7 text-slate-300">{subtitle}</p>
-
-      <details className="mt-5 rounded-2xl border border-slate-800/70 bg-slate-900/60 px-4 py-3">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-          Request JSON
-        </summary>
-        <pre className="mt-4 overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-slate-300">
-          {formatJson(request)}
-        </pre>
-      </details>
-
-      <details className="mt-3 rounded-2xl border border-slate-800/70 bg-slate-900/60 px-4 py-3">
-        <summary className="cursor-pointer text-sm font-semibold text-slate-200">
-          Response JSON
-        </summary>
-        <pre className="mt-4 overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-slate-300">
-          {formatJson(response)}
-        </pre>
-      </details>
-    </article>
-  );
-}
-
 function EmptyState() {
   return (
     <section className="rounded-[28px] border border-slate-700/40 bg-slate-950/45 px-6 py-8 text-sm leading-7 text-slate-300">
@@ -596,18 +541,6 @@ function splitTextLines(text?: string | null) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-}
-
-function formatJson(value: unknown) {
-  if (value === null || value === undefined) {
-    return "No data captured.";
-  }
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function formatDateTime(value?: string | null) {

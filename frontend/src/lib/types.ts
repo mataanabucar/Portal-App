@@ -94,7 +94,7 @@ export interface SummaryResult {
   reason: string | null;
   suggestedFocus: string | null;
   summary: string;
-  request?: {
+  trace?: {
     provider: string;
     model: string;
     endpoint?: string | null;
@@ -111,7 +111,6 @@ export interface ParserResult {
   testchat: boolean;
   reason: string | null;
   originalText: string;
-  request: unknown;
   parsed?: { items: ParsedPortalItem[] };
   responseText?: string; // only when testchat === true
   debug: {
@@ -128,6 +127,18 @@ export interface DashboardResponse {
   snapshot: PortalSnapshot;
   summary: SummaryResult | null;
   parser: ParserResult;
+}
+
+export interface DashboardCacheRecord {
+  cachedAt: string;
+  healthPayload: HealthResponse;
+  payload: DashboardResponse;
+  controls?: {
+    includeSummary?: boolean;
+    parserTestchat?: boolean;
+    focus?: string;
+    parserFocus?: string;
+  };
 }
 
 export interface DashboardRequest {

@@ -21,6 +21,7 @@ export function createPlaywrightHtmlPortalSource(config) {
 
   let authPage = null;
   let sessionPromise = null;
+  let sessionMode = "";
   let disposed = false;
 
   return {
@@ -88,8 +89,41 @@ export function createPlaywrightHtmlPortalSource(config) {
       throw new Error("browser-html mode currently supports GET and HEAD requests only.");
     }
 
+    if (hasInteractiveSession()) {
+      return fetchHtmlPageWithBrowser({
+        url,
+        label,
+        headless: false,
+        interactive: true
+      });
+    }
+
+    if (!config.playwrightConnectToExisting) {
+      const backgroundHtml = await fetchHtmlPageWithBrowser({
+        url,
+        label,
+        headless: true,
+        interactive: false
+      });
+
+      if (backgroundHtml) {
+        return backgroundHtml;
+      }
+
+      await resetSession();
+    }
+
+    return fetchHtmlPageWithBrowser({
+      url,
+      label,
+      headless: false,
+      interactive: true
+    });
+  }
+
+  async function fetchHtmlPageWithBrowser({ url, label, headless, interactive }) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const session = await getSession();
+      const session = await getSession({ headless });
       let page = null;
       let keepOpen = false;
 
@@ -112,6 +146,10 @@ export function createPlaywrightHtmlPortalSource(config) {
         const finalUrl = page.url();
 
         if (isMicrosoftLoginPage({ url: finalUrl, html })) {
+          if (!interactive) {
+            return null;
+          }
+
           keepOpen = true;
           authPage = page;
           await closeSiblingBlankPages(session.context, page);
@@ -146,17 +184,33 @@ export function createPlaywrightHtmlPortalSource(config) {
     }
   }
 
-  async function getSession() {
+  async function getSession({ headless }) {
+    const nextSessionMode = config.playwrightConnectToExisting
+      ? "connected"
+      : headless
+        ? "headless"
+        : "interactive";
+
+    if (sessionPromise && sessionMode && sessionMode !== nextSessionMode) {
+      await resetSession();
+    }
+
     if (sessionPromise) {
       return sessionPromise;
     }
 
-    sessionPromise = createTrackedSession(config);
+    sessionMode = nextSessionMode;
+    sessionPromise = createTrackedSession(
+      config.playwrightConnectToExisting
+        ? config
+        : { ...config, playwrightHeadless: headless }
+    );
     return sessionPromise;
   }
 
   async function resetSession() {
     authPage = null;
+    sessionMode = "";
 
     if (!sessionPromise) {
       return;
@@ -177,6 +231,7 @@ export function createPlaywrightHtmlPortalSource(config) {
         const clearSession = () => {
           if (sessionPromise === createdSessionPromise) {
             sessionPromise = null;
+            sessionMode = "";
           }
 
           authPage = null;
@@ -191,10 +246,15 @@ export function createPlaywrightHtmlPortalSource(config) {
       .catch(() => {
         if (sessionPromise === createdSessionPromise) {
           sessionPromise = null;
+          sessionMode = "";
         }
       });
 
     return createdSessionPromise;
+  }
+
+  function hasInteractiveSession() {
+    return Boolean(authPage) || (Boolean(sessionPromise) && sessionMode === "interactive");
   }
 
   async function seedPortalCookieCache(session) {

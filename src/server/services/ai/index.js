@@ -42,7 +42,7 @@ export function createSummarizer(config, { teamGptAuthService } = {}) {
 
 async function summarizeWithOpenAi(config, client, snapshot, focus) {
   const instructions = buildInstructions(focus);
-  const request = buildSummaryRequestTrace({
+  const trace = buildSummaryTrace({
     provider: "openai",
     model: config.openAiModel,
     instructions,
@@ -62,13 +62,13 @@ async function summarizeWithOpenAi(config, client, snapshot, focus) {
     reason: null,
     suggestedFocus: normalizeFocus(focus),
     summary: response.output_text,
-    request
+    trace
   };
 }
 
 async function summarizeWithTeamGpt(config, teamGptClient, snapshot, focus) {
   const instructions = buildInstructions(focus);
-  const request = buildSummaryRequestTrace({
+  const trace = buildSummaryTrace({
     provider: "teamgpt",
     model: config.teamGptModel,
     instructions,
@@ -81,7 +81,7 @@ async function summarizeWithTeamGpt(config, teamGptClient, snapshot, focus) {
       config,
       focus,
       "TeamGPT client is not available.",
-      request
+      trace
     );
   }
 
@@ -103,10 +103,10 @@ async function summarizeWithTeamGpt(config, teamGptClient, snapshot, focus) {
       reason: null,
       suggestedFocus: normalizeFocus(focus),
       summary: response.text,
-      request
+      trace
     };
   } catch (error) {
-    return buildTeamGptFailureSummary(config, focus, error?.message, request);
+    return buildTeamGptFailureSummary(config, focus, error?.message, trace);
   }
 }
 
@@ -153,7 +153,7 @@ function buildDisabledReason(config, provider) {
     : "Set OPENAI_API_KEY and OPENAI_ENABLED=true to use OpenAI summaries.";
 }
 
-function buildTeamGptFailureSummary(config, focus, reason, request = null) {
+function buildTeamGptFailureSummary(config, focus, reason, trace = null) {
   return {
     enabled: false,
     provider: "teamgpt",
@@ -165,11 +165,11 @@ function buildTeamGptFailureSummary(config, focus, reason, request = null) {
     suggestedFocus: normalizeFocus(focus),
     summary:
       "TeamGPT summarization is unavailable right now. The portal snapshot loaded successfully.",
-    request
+    trace
   };
 }
 
-function buildSummaryRequestTrace({ provider, model, instructions, input, endpoint = "" }) {
+function buildSummaryTrace({ provider, model, instructions, input, endpoint = "" }) {
   return {
     provider,
     model,

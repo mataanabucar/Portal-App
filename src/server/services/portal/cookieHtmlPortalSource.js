@@ -22,6 +22,7 @@ export function createCookieHtmlPortalSource(config) {
 
   let authPage = null;
   let sessionPromise = null;
+  let sessionMode = "";
   let disposed = false;
   const cookieCachePath = resolvePortalCookieCachePath(config.portalCookieCacheFile);
 
@@ -88,8 +89,35 @@ export function createCookieHtmlPortalSource(config) {
   }
 
   async function refreshCookieHeader() {
+    if (hasInteractiveSession()) {
+      return refreshCookieHeaderWithBrowser({
+        headless: false,
+        interactive: true
+      });
+    }
+
+    if (!config.playwrightConnectToExisting) {
+      const backgroundCookieHeader = await refreshCookieHeaderWithBrowser({
+        headless: true,
+        interactive: false
+      });
+
+      if (backgroundCookieHeader) {
+        return backgroundCookieHeader;
+      }
+
+      await resetSession();
+    }
+
+    return refreshCookieHeaderWithBrowser({
+      headless: false,
+      interactive: true
+    });
+  }
+
+  async function refreshCookieHeaderWithBrowser({ headless, interactive }) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const session = await getSession();
+      const session = await getSession({ headless });
       let page = null;
       let keepOpen = false;
 
@@ -112,6 +140,10 @@ export function createCookieHtmlPortalSource(config) {
         const finalUrl = page.url();
 
         if (isMicrosoftLoginPage({ url: finalUrl, html })) {
+          if (!interactive) {
+            return "";
+          }
+
           keepOpen = true;
           authPage = page;
           await closeSiblingBlankPages(session.context, page);
@@ -166,17 +198,33 @@ export function createCookieHtmlPortalSource(config) {
     throw new Error("Portal cookie refresh failed unexpectedly.");
   }
 
-  async function getSession() {
+  async function getSession({ headless }) {
+    const nextSessionMode = config.playwrightConnectToExisting
+      ? "connected"
+      : headless
+        ? "headless"
+        : "interactive";
+
+    if (sessionPromise && sessionMode && sessionMode !== nextSessionMode) {
+      await resetSession();
+    }
+
     if (sessionPromise) {
       return sessionPromise;
     }
 
-    sessionPromise = createTrackedSession(config);
+    sessionMode = nextSessionMode;
+    sessionPromise = createTrackedSession(
+      config.playwrightConnectToExisting
+        ? config
+        : { ...config, playwrightHeadless: headless }
+    );
     return sessionPromise;
   }
 
   async function resetSession() {
     authPage = null;
+    sessionMode = "";
 
     if (!sessionPromise) {
       return;
@@ -196,6 +244,7 @@ export function createCookieHtmlPortalSource(config) {
         const clearSession = () => {
           if (sessionPromise === createdSessionPromise) {
             sessionPromise = null;
+            sessionMode = "";
           }
 
           authPage = null;
@@ -210,10 +259,15 @@ export function createCookieHtmlPortalSource(config) {
       .catch(() => {
         if (sessionPromise === createdSessionPromise) {
           sessionPromise = null;
+          sessionMode = "";
         }
       });
 
     return createdSessionPromise;
+  }
+
+  function hasInteractiveSession() {
+    return Boolean(authPage) || (Boolean(sessionPromise) && sessionMode === "interactive");
   }
 }
 

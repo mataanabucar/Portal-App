@@ -1,5 +1,5 @@
-import { AITracePage } from "@/components/trace/AITracePage";
+import { redirect } from "next/navigation";
 
 export default function AITraceRoute() {
-  return <AITracePage />;
+  redirect("/");
 }

@@ -48,7 +48,6 @@ export function createPortalParser(config) {
             testchat: true,
             reason: null,
             originalText,
-            request,
             responseText: response.output_text,
             debug: buildDebugObject({
               requestId,
@@ -64,7 +63,6 @@ export function createPortalParser(config) {
             testchat: false,
             reason: null,
             originalText,
-            request,
             parsed: normalizePortalSummaryBatch(
               parseStructuredOutput(response.output_text),
               snapshot,

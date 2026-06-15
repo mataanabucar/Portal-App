@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
-import { RefreshCw, BookOpen, BrainCircuit } from "lucide-react";
+import { RefreshCw, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AISummaryCard } from "@/components/ai-summary/AISummaryCard";
@@ -12,11 +11,20 @@ import { orderByPriority } from "@/lib/priority";
 import { useDashboard } from "@/hooks/useDashboard";
 
 export function DashboardPage() {
-  const { items, error, isLoading, refresh } = useDashboard({
+  const {
+    items,
+    error,
+    isLoading,
+    isRefreshing,
+    isBackendReady,
+    isCheckingConnection,
+    loadingProgress,
+    loadingLabel,
+    refresh,
+  } = useDashboard({
     includeSummary: true,
   });
   const [quickReadOpen, setQuickReadOpen] = useState(false);
-  const loadProgress = isLoading ? 68 : 100;
 
   // Cards are shown ordered by priority too, so the grid and Quick Read agree.
   const orderedItems = orderByPriority(items);
@@ -44,16 +52,6 @@ export function DashboardPage() {
           </div>
           <div className="flex items-center gap-2">
             <Button
-              asChild
-              variant="outline"
-              className="rounded-full border-violet-600/40 text-violet-200 hover:border-violet-400"
-            >
-              <Link href="/ai-trace">
-                <BrainCircuit className="w-4 h-4" />
-                AI Trace
-              </Link>
-            </Button>
-            <Button
               variant="outline"
               onClick={() => setQuickReadOpen(true)}
               disabled={isLoading}
@@ -65,13 +63,19 @@ export function DashboardPage() {
             <Button
               variant="outline"
               onClick={refresh}
-              disabled={isLoading}
+              disabled={isCheckingConnection || !isBackendReady || isRefreshing}
               className="rounded-full border-slate-600 hover:border-cyan-500"
             >
               <RefreshCw
-                className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+                className={`h-3.5 w-3.5 ${
+                  isCheckingConnection || isRefreshing ? "animate-spin" : ""
+                }`}
               />
-              Refresh queue
+              {isCheckingConnection
+                ? "Checking connection"
+                : isRefreshing
+                  ? "Refreshing queue"
+                  : "Refresh queue"}
             </Button>
           </div>
         </section>
@@ -85,7 +89,12 @@ export function DashboardPage() {
         {/* Loading overlay — covers cards and blocks all interaction */}
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-20">
-            <PillProgress3D progress={loadProgress} label="LOADING QUEUE..." width={420} height={60} />
+            <PillProgress3D
+              progress={loadingProgress}
+              label={loadingLabel}
+              width={420}
+              height={60}
+            />
           </div>
         )}
 
