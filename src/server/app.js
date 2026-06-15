@@ -19,13 +19,14 @@ import {
 import { findItemEmail } from "./services/graph/services/itemEmailService.js";
 import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
+import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
 const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, sourcebotService }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, sourcebotService, teamGptAuthService }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -42,6 +43,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           summarizer,
           parser,
           asker,
+          teamGptAuthService,
           testerConfig: parseTesterConfigQuery(request.query?.testerConfig)
         },
         async ({
@@ -115,6 +117,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           portalService,
           summarizer,
           parser,
+          teamGptAuthService,
           testerConfig: normalizeTesterConfig(request.body?.testerConfig)
         },
         async ({ portalService: runtimePortalService, summarizer: runtimeSummarizer }) => {
@@ -122,7 +125,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             portalService: runtimePortalService,
             summarizer: runtimeSummarizer,
             includeSummary: request.body?.includeSummary === true,
-            focus: request.body?.focus
+            focus: request.body?.focus,
+            summaryProvider: request.body?.summaryProvider
           });
 
           response.json(payload);
@@ -141,6 +145,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           portalService,
           summarizer,
           parser,
+          teamGptAuthService,
           testerConfig: normalizeTesterConfig(request.body?.testerConfig)
         },
         async ({ portalService: runtimePortalService, parser: runtimeParser }) => {
@@ -171,6 +176,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           summarizer,
           parser,
           asker,
+          teamGptAuthService,
           testerConfig: normalizeTesterConfig(request.body?.testerConfig)
         },
         async ({ asker: runtimeAsker }) => {
@@ -187,12 +193,84 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           const payload = await buildAskPayload({
             asker: runtimeAsker,
             prompt,
-            model: request.body?.model
+            model: request.body?.model,
+            provider: request.body?.provider,
+            threadId: request.body?.threadId
           });
 
           response.json(payload);
         }
       );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/teamgpt/auth", async (request, response, next) => {
+    try {
+      const authPayload = await teamGptAuthService.getJwtToken();
+      response.json({
+        ok: true,
+        jwtToken: authPayload.jwtToken,
+        pageUrl: authPayload.pageUrl,
+        endpointUrl: config.teamGptEndpointUrl,
+        appId: config.teamGptAppId,
+        environment: config.teamGptEnvironment
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/teamgpt/test", async (request, response, next) => {
+    try {
+      const endpointUrl = normalizeTeamGptEndpointUrl(request.body?.endpointUrl);
+      const headers = normalizeTeamGptHeaders(request.body?.headers);
+      const body = request.body?.body && typeof request.body.body === "object"
+        ? request.body.body
+        : {};
+      let usedAutoAuth = false;
+      let tokenPreview = "";
+
+      if (!headers.Authorization) {
+        const authPayload = await teamGptAuthService.getJwtToken();
+        headers.Authorization = `Bearer ${authPayload.jwtToken}`;
+        headers.appid = headers.appid || config.teamGptAppId;
+        headers.environment = headers.environment || config.teamGptEnvironment;
+        headers.ThreadID = headers.ThreadID || "";
+        usedAutoAuth = true;
+      } else {
+        headers.appid = headers.appid || config.teamGptAppId;
+        headers.environment = headers.environment || config.teamGptEnvironment;
+        headers.ThreadID = headers.ThreadID || "";
+      }
+
+      tokenPreview = buildTokenPreview(headers.Authorization);
+
+      const upstreamResponse = await fetch(endpointUrl, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+
+      const rawText = await upstreamResponse.text();
+      response.status(upstreamResponse.status).json({
+        ok: upstreamResponse.ok,
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        usedAutoAuth,
+        endpointUrl,
+        headers: {
+          ...headers,
+          Authorization: headers.Authorization ? "[redacted]" : ""
+        },
+        tokenPreview,
+        requestBody: body,
+        rawText
+      });
     } catch (error) {
       next(error);
     }
@@ -207,6 +285,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           summarizer,
           parser,
           asker,
+          teamGptAuthService,
           testerConfig: normalizeTesterConfig(request.body?.testerConfig)
         },
         async ({
@@ -223,6 +302,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             emailContextSummarizer,
             includeSummary: request.body?.includeSummary !== false,
             focus: request.body?.focus,
+            summaryProvider: request.body?.summaryProvider,
             parserFocus: request.body?.parserFocus,
             parserTestchat: request.body?.parserTestchat === true,
             model: request.body?.model
@@ -297,7 +377,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
 }
 
 async function respondWithRuntime(
-  { config, portalService, summarizer, parser, asker, testerConfig },
+  { config, portalService, summarizer, parser, asker, teamGptAuthService, testerConfig },
   action
 ) {
   if (!hasTesterConfigOverrides(testerConfig)) {
@@ -313,9 +393,14 @@ async function respondWithRuntime(
 
   const effectiveConfig = buildConfig(testerConfig);
   const runtimePortalService = createPortalService(effectiveConfig);
-  const runtimeSummarizer = createSummarizer(effectiveConfig);
+  const runtimeTeamGptAuthService = createTeamGptAuthService(effectiveConfig);
+  const runtimeSummarizer = createSummarizer(effectiveConfig, {
+    teamGptAuthService: runtimeTeamGptAuthService
+  });
   const runtimeParser = createPortalParser(effectiveConfig);
-  const runtimeAsker = createAskService(effectiveConfig);
+  const runtimeAsker = createAskService(effectiveConfig, {
+    teamGptAuthService: runtimeTeamGptAuthService
+  });
 
   try {
     return await action({
@@ -327,6 +412,7 @@ async function respondWithRuntime(
       usingTesterConfig: true
     });
   } finally {
+    await runtimeTeamGptAuthService.dispose();
     await runtimePortalService.dispose();
   }
 }
@@ -335,11 +421,14 @@ async function buildPreviewPayload({
   portalService,
   summarizer,
   includeSummary,
-  focus
+  focus,
+  summaryProvider
 }) {
   const snapshot = await portalService.fetchSnapshot();
   const summary = includeSummary
-    ? await summarizer.summarize(snapshot, focus)
+    ? await summarizer.summarize(snapshot, focus, {
+        provider: summaryProvider
+      })
     : null;
 
   return {
@@ -371,9 +460,11 @@ async function buildParserPayload({
   };
 }
 
-async function buildAskPayload({ asker, prompt, model }) {
+async function buildAskPayload({ asker, prompt, model, provider, threadId }) {
   return asker.ask(prompt, {
-    model
+    model,
+    provider,
+    threadId
   });
 }
 
@@ -385,6 +476,7 @@ async function buildDashboardPayload({
   emailContextSummarizer,
   includeSummary,
   focus,
+  summaryProvider,
   parserFocus,
   parserTestchat,
   model
@@ -392,7 +484,11 @@ async function buildDashboardPayload({
   const snapshot = await portalService.fetchSnapshot();
   await tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot);
   const [summary, parsed] = await Promise.all([
-    includeSummary ? summarizer.summarize(snapshot, focus) : Promise.resolve(null),
+    includeSummary
+      ? summarizer.summarize(snapshot, focus, {
+          provider: summaryProvider
+        })
+      : Promise.resolve(null),
     parser.parseSnapshot(snapshot, {
       focus: parserFocus,
       testchat: parserTestchat,
@@ -411,6 +507,50 @@ function normalizeAskPrompt(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeTeamGptEndpointUrl(value) {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : config.teamGptEndpointUrl;
+}
+
+function normalizeTeamGptHeaders(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+
+  const headers = {};
+  for (const [key, entryValue] of Object.entries(value)) {
+    if (typeof entryValue !== "string") {
+      continue;
+    }
+
+    const normalizedKey = String(key || "").trim();
+    const normalizedValue = entryValue.trim();
+    if (!normalizedKey || !normalizedValue) {
+      continue;
+    }
+
+    headers[normalizedKey] = normalizedValue;
+  }
+
+  return headers;
+}
+
+function buildTokenPreview(authorizationHeader = "") {
+  const rawToken = authorizationHeader.startsWith("Bearer ")
+    ? authorizationHeader.slice(7).trim()
+    : authorizationHeader.trim();
+
+  if (!rawToken) {
+    return "";
+  }
+
+  if (rawToken.length <= 24) {
+    return rawToken;
+  }
+
+  return `${rawToken.slice(0, 12)}...${rawToken.slice(-8)}`;
+}
 
 async function tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot) {
   if (!graphAuth || !Array.isArray(snapshot?.records)) return;

@@ -1,0 +1,23 @@
+$body = @{
+    wordlimit   = "1500"
+    format      = "any"
+    tone        = "Professional + Straightforward"
+    temperature = 0.5
+    model       = "anthropic.claude-haiku-4-5-20251001-v1:0"
+    messages    = @(
+        @{ role = "user"; content = @(@{ text = "What is the capital of France?" }) }
+    )
+    additionalModelRequestFields = @{}
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+    -Uri "https://genai-proxy-na.benchmarkdigital.com/bedrock/converse/chat/teamgpt-ask-anything-bedrock?stream=true" `
+    -Method POST `
+    -Headers @{
+        "Authorization" = "Bearer xxxxxxxx"
+        "appid"         = "9225"
+        "environment"   = "prod"
+        "ThreadID"      = ""
+    } `
+    -ContentType "application/json" `
+    -Body $body

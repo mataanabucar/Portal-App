@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { Menu, Sparkles, LayoutDashboard } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -12,7 +13,8 @@ export interface SidebarAction {
   id: string;
   label: string;
   icon: LucideIcon;
-  onSelect: () => void;
+  href?: string;
+  onSelect?: () => void;
   active?: boolean;
 }
 
@@ -67,25 +69,42 @@ export function Sidebar({ actions }: { actions: SidebarAction[] }) {
         <ul className="space-y-1 px-2">
           {actions.map((action) => {
             const Icon = action.icon;
+            const content = (
+              <>
+                <Icon className="w-5 h-5 shrink-0" />
+                {!collapsed && (
+                  <span className="whitespace-nowrap">{action.label}</span>
+                )}
+              </>
+            );
+            const actionClassName = cn(
+              "w-full flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
+              "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100",
+              action.active &&
+                "bg-cyan-950/40 text-cyan-200 ring-1 ring-cyan-700/40",
+              collapsed && "justify-center"
+            );
+
             return (
               <li key={action.id}>
-                <button
-                  type="button"
-                  onClick={action.onSelect}
-                  title={collapsed ? action.label : undefined}
-                  className={cn(
-                    "w-full flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-colors",
-                    "text-slate-300 hover:bg-slate-800/70 hover:text-slate-100",
-                    action.active &&
-                      "bg-cyan-950/40 text-cyan-200 ring-1 ring-cyan-700/40",
-                    collapsed && "justify-center"
-                  )}
-                >
-                  <Icon className="w-5 h-5 shrink-0" />
-                  {!collapsed && (
-                    <span className="whitespace-nowrap">{action.label}</span>
-                  )}
-                </button>
+                {action.href ? (
+                  <Link
+                    href={action.href}
+                    title={collapsed ? action.label : undefined}
+                    className={actionClassName}
+                  >
+                    {content}
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={action.onSelect}
+                    title={collapsed ? action.label : undefined}
+                    className={actionClassName}
+                  >
+                    {content}
+                  </button>
+                )}
               </li>
             );
           })}

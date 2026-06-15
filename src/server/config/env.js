@@ -63,6 +63,18 @@ export function buildConfig(overrides = {}) {
     openAiApiKey: process.env.OPENAI_API_KEY || "",
     openAiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
     openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
+    summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, "teamgpt"),
+    askProvider: normalizeAiProvider(process.env.ASK_PROVIDER, "teamgpt"),
+    teamGptPageUrl:
+      process.env.TEAMGPT_PAGE_URL ||
+      "https://tools.benchmarkdigital.com/gsportal/genai/index.cfm",
+    teamGptEndpointUrl:
+      process.env.TEAMGPT_ENDPOINT_URL ||
+      "https://genai-proxy-na.benchmarkdigital.com/bedrock/converse/chat/teamgpt-ask-anything-bedrock?stream=true",
+    teamGptAppId: process.env.TEAMGPT_APP_ID || "9225",
+    teamGptEnvironment: process.env.TEAMGPT_ENVIRONMENT || "prod",
+    teamGptModel:
+      process.env.TEAMGPT_MODEL || "anthropic.claude-haiku-4-5-20251001-v1:0",
 
     // Sourcebot
     sourcebotHost:   process.env.SOURCEBOT_HOST    || "",
@@ -74,8 +86,16 @@ export function buildConfig(overrides = {}) {
     graphClientSecret:  process.env.GRAPH_CLIENT_SECRET  || "",
     graphRedirectUri:   process.env.GRAPH_REDIRECT_URI   || "http://localhost:3069/auth/redirect",
     graphScopes:        (process.env.GRAPH_SCOPES || "User.Read Mail.Read Calendars.Read offline_access").split(" ").filter(Boolean),
-    graphTokenCacheFile: process.env.GRAPH_TOKEN_CACHE_FILE || ".local-auth/graph-tester-token.json"
+    graphTokenCacheFile: process.env.GRAPH_TOKEN_CACHE_FILE || ".local-auth/graph-tester-token.json",
+    teamGptTokenCacheFile: process.env.TEAMGPT_TOKEN_CACHE_FILE || ".local-auth/teamgpt-token.json"
   };
 
   return { ...baseConfig, ...overrides };
+}
+
+function normalizeAiProvider(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "openai" || normalized === "teamgpt"
+    ? normalized
+    : fallback;
 }

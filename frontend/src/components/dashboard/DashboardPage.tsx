@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { RefreshCw, BookOpen } from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
+import { RefreshCw, BookOpen, BrainCircuit } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Sidebar, type SidebarAction } from "@/components/layout/Sidebar";
+import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AISummaryCard } from "@/components/ai-summary/AISummaryCard";
 import { QuickReadModal } from "@/components/quick-read/QuickReadModal";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
@@ -15,26 +16,7 @@ export function DashboardPage() {
     includeSummary: true,
   });
   const [quickReadOpen, setQuickReadOpen] = useState(false);
-
-  // Fake progress: crawl to 85% while loading, snap to 100% on completion.
-  const [loadProgress, setLoadProgress] = useState(0);
-  const crawlRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (isLoading) {
-      setLoadProgress(0);
-      crawlRef.current = setInterval(() => {
-        setLoadProgress((p) => {
-          const remaining = 85 - p;
-          return p + Math.max(0.3, remaining * 0.04);
-        });
-      }, 120);
-    } else {
-      if (crawlRef.current) clearInterval(crawlRef.current);
-      setLoadProgress(100);
-    }
-    return () => { if (crawlRef.current) clearInterval(crawlRef.current); };
-  }, [isLoading]);
+  const loadProgress = isLoading ? 68 : 100;
 
   // Cards are shown ordered by priority too, so the grid and Quick Read agree.
   const orderedItems = orderByPriority(items);
@@ -45,19 +27,12 @@ export function DashboardPage() {
       ? String(error.message ?? error)
       : `${items.length} item${items.length !== 1 ? "s" : ""}`;
 
-  const sidebarActions: SidebarAction[] = [
-    {
-      id: "quick-read",
-      label: "Quick Read",
-      icon: BookOpen,
-      onSelect: () => setQuickReadOpen(true),
-      active: quickReadOpen,
-    },
-  ];
-
   return (
     <div className="flex min-h-screen">
-      <Sidebar actions={sidebarActions} />
+      <AppSidebar
+        onQuickRead={() => setQuickReadOpen(true)}
+        quickReadActive={quickReadOpen}
+      />
 
       <main className="flex-1 min-w-0 px-5 py-8 space-y-6">
         <section className="flex items-start justify-between gap-4">
@@ -68,6 +43,16 @@ export function DashboardPage() {
             <p className="text-sm text-slate-400 mt-1">{statusLine}</p>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              asChild
+              variant="outline"
+              className="rounded-full border-violet-600/40 text-violet-200 hover:border-violet-400"
+            >
+              <Link href="/ai-trace">
+                <BrainCircuit className="w-4 h-4" />
+                AI Trace
+              </Link>
+            </Button>
             <Button
               variant="outline"
               onClick={() => setQuickReadOpen(true)}

@@ -1,41 +1,113 @@
 import OpenAI from "openai";
-import { createAskService } from "./ask.js";
 import { createDisabledSummarizer } from "./disabledSummarizer.js";
+import { createAskService } from "./ask.js";
 import { createPortalParser } from "./portalParser.js";
 import { createEmailContextSummarizer } from "./emailContextSummarizer.js";
+import { createTeamGptClient } from "../teamgpt/client.js";
 
-export function createSummarizer(config) {
-  if (!config.openAiEnabled || !config.openAiApiKey) {
-    return createDisabledSummarizer(config);
-  }
-
-  const client = new OpenAI({ apiKey: config.openAiApiKey });
+export function createSummarizer(config, { teamGptAuthService } = {}) {
+  const openAiClient =
+    config.openAiEnabled && config.openAiApiKey
+      ? new OpenAI({ apiKey: config.openAiApiKey })
+      : null;
+  const teamGptClient = createTeamGptClient(config, teamGptAuthService);
 
   return {
     describe() {
+      const provider = resolveProvider(config.summaryProvider);
+      const enabled = isProviderEnabled(provider, openAiClient, teamGptClient);
       return {
-        enabled: true,
-        model: config.openAiModel
+        enabled,
+        provider,
+        model: resolveModel(config, provider),
+        reason: enabled ? null : buildDisabledReason(config, provider)
       };
     },
 
-    async summarize(snapshot, focus) {
-      const response = await client.responses.create({
-        model: config.openAiModel,
-        store: false,
-        instructions: buildInstructions(focus),
-        input: snapshot.summaryInput
-      });
+    async summarize(snapshot, focus, options = {}) {
+      const provider = resolveProvider(options.provider || config.summaryProvider);
 
-      return {
-        enabled: true,
-        model: config.openAiModel,
-        reason: null,
-        suggestedFocus: normalizeFocus(focus),
-        summary: response.output_text
-      };
+      if (provider === "teamgpt") {
+        return summarizeWithTeamGpt(config, teamGptClient, snapshot, focus);
+      }
+
+      if (!openAiClient) {
+        return createDisabledSummarizer(config).summarize(snapshot, focus);
+      }
+
+      return summarizeWithOpenAi(config, openAiClient, snapshot, focus);
     }
   };
+}
+
+async function summarizeWithOpenAi(config, client, snapshot, focus) {
+  const instructions = buildInstructions(focus);
+  const request = buildSummaryRequestTrace({
+    provider: "openai",
+    model: config.openAiModel,
+    instructions,
+    input: snapshot.summaryInput
+  });
+  const response = await client.responses.create({
+    model: config.openAiModel,
+    store: false,
+    instructions,
+    input: snapshot.summaryInput
+  });
+
+  return {
+    enabled: true,
+    provider: "openai",
+    model: config.openAiModel,
+    reason: null,
+    suggestedFocus: normalizeFocus(focus),
+    summary: response.output_text,
+    request
+  };
+}
+
+async function summarizeWithTeamGpt(config, teamGptClient, snapshot, focus) {
+  const instructions = buildInstructions(focus);
+  const request = buildSummaryRequestTrace({
+    provider: "teamgpt",
+    model: config.teamGptModel,
+    instructions,
+    input: snapshot.summaryInput,
+    endpoint: config.teamGptEndpointUrl
+  });
+
+  if (!teamGptClient) {
+    return buildTeamGptFailureSummary(
+      config,
+      focus,
+      "TeamGPT client is not available.",
+      request
+    );
+  }
+
+  try {
+    const response = await teamGptClient.completeText({
+      instructions,
+      prompt: snapshot.summaryInput,
+      model: config.teamGptModel,
+      wordLimit: 900,
+      tone: "Professional + Straightforward",
+      format: "plain_text",
+      temperature: 0.2
+    });
+
+    return {
+      enabled: true,
+      provider: "teamgpt",
+      model: response.model,
+      reason: null,
+      suggestedFocus: normalizeFocus(focus),
+      summary: response.text,
+      request
+    };
+  } catch (error) {
+    return buildTeamGptFailureSummary(config, focus, error?.message, request);
+  }
 }
 
 export { createPortalParser };
@@ -57,4 +129,53 @@ function buildInstructions(focus) {
 
 function normalizeFocus(focus) {
   return typeof focus === "string" && focus.trim() ? focus.trim() : null;
+}
+
+function resolveProvider(value) {
+  return value === "openai" ? "openai" : "teamgpt";
+}
+
+function resolveModel(config, provider) {
+  return provider === "teamgpt" ? config.teamGptModel : config.openAiModel;
+}
+
+function isProviderEnabled(provider, openAiClient, teamGptClient) {
+  return provider === "teamgpt" ? Boolean(teamGptClient) : Boolean(openAiClient);
+}
+
+function buildDisabledReason(config, provider) {
+  if (provider === "teamgpt") {
+    return "TeamGPT is not available. Verify TeamGPT page access and local browser auth.";
+  }
+
+  return config.openAiApiKey
+    ? "Enable OPENAI_ENABLED=true to use OpenAI summaries."
+    : "Set OPENAI_API_KEY and OPENAI_ENABLED=true to use OpenAI summaries.";
+}
+
+function buildTeamGptFailureSummary(config, focus, reason, request = null) {
+  return {
+    enabled: false,
+    provider: "teamgpt",
+    model: config.teamGptModel,
+    reason:
+      typeof reason === "string" && reason.trim()
+        ? reason.trim()
+        : "TeamGPT summarization is unavailable right now.",
+    suggestedFocus: normalizeFocus(focus),
+    summary:
+      "TeamGPT summarization is unavailable right now. The portal snapshot loaded successfully.",
+    request
+  };
+}
+
+function buildSummaryRequestTrace({ provider, model, instructions, input, endpoint = "" }) {
+  return {
+    provider,
+    model,
+    endpoint: endpoint || null,
+    instructions,
+    input,
+    inputLength: typeof input === "string" ? input.length : 0
+  };
 }

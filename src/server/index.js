@@ -11,21 +11,24 @@ import {
 import { createPortalService } from "./services/portal/index.js";
 import { createPortalGraphAuth } from "./services/graph/portalGraphAuth.js";
 import { createSourcebotService } from "./services/sourcebot/index.js";
+import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
 export function startServer(overrides = {}) {
   const config = buildConfig(overrides);
   const portalService = createPortalService(config);
   const graphAuth = createPortalGraphAuth(config);
   const sourcebotService = createSourcebotService(config);
+  const teamGptAuthService = createTeamGptAuthService(config);
   const app = createApp({
     config,
     portalService,
-    summarizer: createSummarizer(config),
+    summarizer: createSummarizer(config, { teamGptAuthService }),
     parser: createPortalParser(config),
-    asker: createAskService(config),
+    asker: createAskService(config, { teamGptAuthService }),
     graphAuth,
     emailContextSummarizer: createEmailContextSummarizer(config),
     sourcebotService,
+    teamGptAuthService,
   });
   let disposed = false;
 
@@ -36,6 +39,7 @@ export function startServer(overrides = {}) {
 
     disposed = true;
     await portalService.dispose();
+    await teamGptAuthService.dispose();
   };
 
   const server = app.listen(config.port, config.host, () => {

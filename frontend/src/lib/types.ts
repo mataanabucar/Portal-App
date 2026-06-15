@@ -89,10 +89,19 @@ export interface PortalSnapshot {
 
 export interface SummaryResult {
   enabled: boolean;
+  provider?: string;
   model: string;
   reason: string | null;
   suggestedFocus: string | null;
   summary: string;
+  request?: {
+    provider: string;
+    model: string;
+    endpoint?: string | null;
+    instructions: string;
+    input: string;
+    inputLength: number;
+  } | null;
 }
 
 export interface ParserResult {
@@ -134,14 +143,24 @@ export interface HealthResponse {
   config: {
     port: number;
     portal: { mode: string; target: string | null; dataPath?: string | null };
-    summarizer: { enabled: boolean; model: string; reason?: string | null };
+    summarizer: {
+      enabled: boolean;
+      provider?: string;
+      model: string;
+      reason?: string | null;
+    };
     parser: {
       enabled: boolean;
       model: string;
       reason?: string | null;
       testchatAllowed: boolean;
     };
-    ask: { enabled: boolean; model: string; reason?: string | null };
+    ask: {
+      enabled: boolean;
+      provider?: string;
+      model: string;
+      reason?: string | null;
+    };
   };
   testing: { usingTesterConfig: boolean };
   now: string;

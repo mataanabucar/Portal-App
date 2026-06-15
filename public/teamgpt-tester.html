@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TeamGPT Proxy Tester</title>
+    <link rel="stylesheet" href="/app.css" />
+    <link rel="stylesheet" href="/teamgpt-tester.css" />
+  </head>
+  <body>
+    <main class="app-shell teamgpt-shell" aria-label="TeamGPT proxy tester">
+      <section class="hero hero-card">
+        <div class="hero-copy">
+          <div>
+            <p class="section-kicker">TeamGPT</p>
+            <h1>Local endpoint tester</h1>
+          </div>
+          <p class="lede">
+            Paste the JWT from <code>GSP.aiconfig.jwtToken</code>, send a prompt through the
+            local relay, and inspect the raw response.
+          </p>
+        </div>
+
+        <div class="hero-actions">
+          <a class="todo-open-link" href="/portal-tester.html">Open portal tester</a>
+          <button id="fetch-auth" type="button" class="tester-secondary-button">Fetch TeamGPT auth</button>
+          <button id="run-test" type="button">Send prompt</button>
+          <div class="status-pill" id="status-pill" role="status" aria-live="polite">Ready</div>
+          <p class="status-age" id="status-text">Waiting for input.</p>
+        </div>
+      </section>
+
+      <section class="focus-grid teamgpt-grid" aria-label="TeamGPT request controls">
+        <article class="summary-card dashboard-sheen-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Provider</p>
+              <h2>Route and auth</h2>
+            </div>
+          </div>
+
+          <label class="stacked-field" for="provider">
+            <span>Provider</span>
+            <select id="provider">
+              <option value="teamgpt" selected>TeamGPT proxy</option>
+              <option value="openai">OpenAI local route</option>
+            </select>
+          </label>
+
+          <label class="stacked-field" for="jwt-token">
+            <span>Bearer token from <code>GSP.aiconfig.jwtToken</code> when TeamGPT is selected</span>
+            <textarea
+              id="jwt-token"
+              rows="5"
+              placeholder="Optional. Leave blank to auto-fetch through the local browser auth flow."
+            ></textarea>
+          </label>
+
+          <div class="inline-fields">
+            <label class="stacked-field">
+              <span>appid</span>
+              <input id="app-id" type="text" value="9225" />
+            </label>
+            <label class="stacked-field">
+              <span>environment</span>
+              <input id="environment" type="text" value="prod" />
+            </label>
+            <label class="stacked-field">
+              <span>ThreadID</span>
+              <input id="thread-id" type="text" placeholder="Leave blank for a new chat" />
+            </label>
+          </div>
+        </article>
+
+        <article class="priority-card dashboard-sheen-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Prompt</p>
+              <h2>Request body</h2>
+            </div>
+          </div>
+
+          <label class="stacked-field" for="endpoint-path">
+            <span>Endpoint path</span>
+            <input
+              id="endpoint-path"
+              type="text"
+              value="https://genai-proxy-na.benchmarkdigital.com/bedrock/converse/chat/teamgpt-ask-anything-bedrock?stream=true"
+            />
+          </label>
+
+          <div class="inline-fields">
+            <label class="stacked-field">
+              <span>Word limit</span>
+              <input id="word-limit" type="number" min="1" value="1500" />
+            </label>
+            <label class="stacked-field">
+              <span>Format</span>
+              <input id="format" type="text" value="any" />
+            </label>
+            <label class="stacked-field">
+              <span>Tone</span>
+              <input id="tone" type="text" value="Professional + Straightforward" />
+            </label>
+            <label class="stacked-field">
+              <span>Temperature</span>
+              <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.5" />
+            </label>
+          </div>
+
+          <label class="stacked-field" for="model">
+            <span>Model</span>
+            <input
+              id="model"
+              type="text"
+              value="anthropic.claude-haiku-4-5-20251001-v1:0"
+            />
+          </label>
+
+          <label class="stacked-field" for="prompt">
+            <span>Message</span>
+            <textarea id="prompt" rows="7">What is the capital of France?</textarea>
+          </label>
+        </article>
+
+        <article class="summary-card dashboard-sheen-card teamgpt-response-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Response</p>
+              <h2>Raw output</h2>
+            </div>
+          </div>
+
+          <pre id="response-output">No response yet.</pre>
+        </article>
+
+        <article class="summary-card dashboard-sheen-card teamgpt-response-card">
+          <span class="dashboard-sheen-card__glint" aria-hidden="true"></span>
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Request</p>
+              <h2>JSON and curl</h2>
+            </div>
+          </div>
+
+          <pre id="request-output">No request yet.</pre>
+          <pre id="curl-output">No curl yet.</pre>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/teamgpt-tester.js"></script>
+  </body>
+</html>
