@@ -15,6 +15,8 @@
     "server:dev": "node --watch src/server/index.js",
     "graph-tester": "node scripts/launch-graph-tester.js",
     "graph-tester:dev": "node scripts/launch-graph-tester.js --watch",
+    "graph-tester:client": "npm --prefix src/graph-tester/client run dev",
+    "graph-tester:client:build": "npm --prefix src/graph-tester/client run build",
     "pack:win": "electron-builder --win dir",
     "dist:win": "electron-builder --win nsis portable",
     "bundle:share": "node scripts/build-shareable-bundle.js",
@@ -48,7 +50,11 @@
       ".env.example",
       "README.md",
       "!notes/**/*",
-      "!.local-browser/**/*"
+      "!.local-browser/**/*",
+      "!src/graph-tester/client/node_modules/**/*",
+      "!src/graph-tester/client/src/**/*",
+      "!src/graph-tester/client/*.ts",
+      "!src/graph-tester/client/*.json"
     ],
     "win": {
       "signAndEditExecutable": false,
