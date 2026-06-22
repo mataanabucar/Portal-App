@@ -173,8 +173,8 @@ async function runMockScenario() {
     );
     console.log(
       "Parser response version OK:",
-      parser.parser.debug?.responseVersion === "2026-06-portal-parse-v3" &&
-        dashboard.parser.debug?.responseVersion === "2026-06-portal-parse-v3"
+      parser.parser.debug?.responseVersion === "2026-06-portal-parse-v4" &&
+        dashboard.parser.debug?.responseVersion === "2026-06-portal-parse-v4"
     );
     console.log(
       "OpenAI payload fields OK:",

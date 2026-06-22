@@ -17,6 +17,64 @@
 import { graphRequest } from "../graphRequest.js";
 
 // ---------------------------------------------------------------------------
+// Read
+// ---------------------------------------------------------------------------
+
+/**
+ * List channels in a team.
+ * @scope Channel.ReadBasic.All or Channel.Read.All
+ */
+export async function listChannels(token, teamId, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/teams/${teamId}/channels`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Get one channel from a team.
+ * @scope Channel.ReadBasic.All or Channel.Read.All
+ */
+export async function getChannel(token, teamId, channelId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/teams/${teamId}/channels/${channelId}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List messages in a channel.
+ * @scope ChannelMessage.Read.All
+ */
+export async function listChannelMessages(token, teamId, channelId, { top, select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/teams/${teamId}/channels/${channelId}/messages`,
+    token,
+    query: { $top: top, $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Get one channel message.
+ * @scope ChannelMessage.Read.All
+ */
+export async function getChannelMessage(token, teamId, channelId, messageId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/teams/${teamId}/channels/${channelId}/messages/${messageId}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Send
 // ---------------------------------------------------------------------------
 

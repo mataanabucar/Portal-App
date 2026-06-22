@@ -22,7 +22,6 @@ const elements = {
   selectedFunctionLabel: document.querySelector("#selected-function-label"),
   selectedServiceLabel: document.querySelector("#selected-service-label"),
   serviceDescription: document.querySelector("#service-description"),
-  serviceSelect: document.querySelector("#service-select"),
 };
 
 const state = {
@@ -33,9 +32,12 @@ const state = {
   selectedFunctionName: "",
 };
 
+let tomSelectInstance = null;
+
 const TABLE_COLUMNS = [
   { key: "id", label: "ID", getter: (item) => item.id },
   { key: "displayName", label: "Name", getter: (item) => item.displayName },
+  { key: "name", label: "Name", getter: (item) => item.name },
   {
     key: "mail",
     label: "Mail",
@@ -45,10 +47,21 @@ const TABLE_COLUMNS = [
       item.emailAddress?.address ||
       item.scoredEmailAddresses?.[0]?.address,
   },
+  { key: "email", label: "Email", getter: (item) => item.email },
+  {
+    key: "userPrincipalName",
+    label: "User principal name",
+    getter: (item) => item.userPrincipalName,
+  },
   {
     key: "subject",
     label: "Subject",
     getter: (item) => item.subject,
+  },
+  {
+    key: "description",
+    label: "Description",
+    getter: (item) => item.description,
   },
   {
     key: "from",
@@ -64,9 +77,34 @@ const TABLE_COLUMNS = [
     getter: (item) => item.receivedDateTime,
   },
   {
+    key: "lastModifiedDateTime",
+    label: "Last modified",
+    getter: (item) => item.lastModifiedDateTime,
+  },
+  {
+    key: "lastUpdatedDateTime",
+    label: "Last updated",
+    getter: (item) => item.lastUpdatedDateTime,
+  },
+  {
     key: "isRead",
     label: "Read",
     getter: (item) => item.isRead,
+  },
+  {
+    key: "contentType",
+    label: "Content type",
+    getter: (item) => item.contentType,
+  },
+  {
+    key: "size",
+    label: "Size",
+    getter: (item) => item.size,
+  },
+  {
+    key: "webUrl",
+    label: "Web URL",
+    getter: (item) => item.webUrl,
   },
   {
     key: "start",
@@ -103,6 +141,36 @@ const TABLE_COLUMNS = [
     label: "Created",
     getter: (item) => item.createdDateTime,
   },
+  {
+    key: "parentFolderId",
+    label: "Parent folder",
+    getter: (item) => item.parentFolderId,
+  },
+  {
+    key: "childFolderCount",
+    label: "Child folders",
+    getter: (item) => item.childFolderCount,
+  },
+  {
+    key: "totalItemCount",
+    label: "Total items",
+    getter: (item) => item.totalItemCount,
+  },
+  {
+    key: "unreadItemCount",
+    label: "Unread items",
+    getter: (item) => item.unreadItemCount,
+  },
+  {
+    key: "sequence",
+    label: "Sequence",
+    getter: (item) => item.sequence,
+  },
+  {
+    key: "color",
+    label: "Color",
+    getter: (item) => item.color,
+  },
 ];
 
 init().catch((error) => {
@@ -124,23 +192,12 @@ async function init() {
   state.session = sessionPayload;
 
   renderHealthState();
-  populateServiceSelect();
+  initFunctionSelect();
   renderSessionState();
   renderSelectedFunction();
 }
 
 function bindEvents() {
-  elements.serviceSelect.addEventListener("change", () => {
-    state.selectedServiceKey = elements.serviceSelect.value;
-    populateFunctionSelect();
-    renderSelectedFunction();
-  });
-
-  elements.functionSelect.addEventListener("change", () => {
-    state.selectedFunctionName = elements.functionSelect.value;
-    renderSelectedFunction();
-  });
-
   elements.loginButton.addEventListener("click", () => {
     window.location.assign("/auth/login");
   });
@@ -161,18 +218,9 @@ function bindEvents() {
     await runSelectedFunction();
   });
 
-  elements.formFields.addEventListener("click", (event) => {
-    const sampleButton = event.target.closest("[data-sample-index]");
-
-    if (!sampleButton) {
-      return;
-    }
-
-    applySampleToField(
-      sampleButton.getAttribute("data-field-name"),
-      Number.parseInt(sampleButton.getAttribute("data-sample-index"), 10)
-    );
-  });
+  elements.formFields.addEventListener("click", handleFormFieldsClick);
+  elements.formFields.addEventListener("change", handleFormFieldsChange);
+  elements.formFields.addEventListener("input", handleFormFieldsInput);
 
   window.addEventListener("focus", () => {
     void refreshSessionState();
@@ -183,6 +231,43 @@ function bindEvents() {
       void refreshSessionState();
     }
   });
+}
+
+function handleFormFieldsClick(event) {
+  const sampleButton = event.target.closest("[data-sample-index]");
+
+  if (sampleButton) {
+    applySampleToField(
+      sampleButton.getAttribute("data-field-name"),
+      Number.parseInt(sampleButton.getAttribute("data-sample-index"), 10)
+    );
+    return;
+  }
+
+  const pickerActionButton = event.target.closest("[data-select-picker-action]");
+
+  if (pickerActionButton) {
+    applySelectPickerAction(
+      pickerActionButton.getAttribute("data-field-name"),
+      pickerActionButton.getAttribute("data-select-picker-action")
+    );
+  }
+}
+
+function handleFormFieldsChange(event) {
+  if (!event.target.matches("[data-select-picker-input]")) {
+    return;
+  }
+
+  syncSelectInputFromPicker(event.target.getAttribute("data-field-name"));
+}
+
+function handleFormFieldsInput(event) {
+  if (!event.target.matches("[data-select-text-input]")) {
+    return;
+  }
+
+  syncPickerFromSelectInput(event.target.name);
 }
 
 async function runSelectedFunction() {
@@ -216,47 +301,71 @@ async function runSelectedFunction() {
   }
 }
 
-function populateServiceSelect() {
+function initFunctionSelect() {
+  if (tomSelectInstance) {
+    tomSelectInstance.destroy();
+    tomSelectInstance = null;
+  }
+
   if (state.catalog.length === 0) {
-    elements.serviceSelect.innerHTML = '<option value="">No services available</option>';
     return;
   }
 
-  const selectedService =
-    state.catalog.find((service) => service.key === state.selectedServiceKey) ||
-    state.catalog[0];
+  const optgroups = state.catalog.map((service) => ({
+    value: service.key,
+    label: service.label,
+  }));
 
-  state.selectedServiceKey = selectedService.key;
-  elements.serviceSelect.innerHTML = state.catalog
-    .map(
-      (service) =>
-        `<option value="${escapeHtml(service.key)}"${service.key === state.selectedServiceKey ? " selected" : ""}>${escapeHtml(service.label)} (${service.functions.length})</option>`
-    )
-    .join("");
+  const options = state.catalog.flatMap((service) =>
+    service.functions.map((fn) => ({
+      value: `${service.key}:${fn.functionName}`,
+      label: fn.label,
+      service: service.key,
+      mutation: fn.mutation || false,
+    }))
+  );
 
-  populateFunctionSelect();
-}
+  tomSelectInstance = new TomSelect(elements.functionSelect, {
+    valueField: "value",
+    labelField: "label",
+    searchField: ["label"],
+    optgroupField: "service",
+    optgroupLabelField: "label",
+    optgroupValueField: "value",
+    lockOptgroupOrder: true,
+    optgroups,
+    options,
+    placeholder: "Search functions…",
+    render: {
+      option(data, escape) {
+        return `<div class="ts-fn-option${data.mutation ? " ts-fn-option--mutation" : ""}">${escape(data.label)}</div>`;
+      },
+      optgroup_header(data, escape) {
+        return `<div class="ts-optgroup-header">${escape(data.label)}</div>`;
+      },
+      item(data, escape) {
+        const service = state.catalog.find((s) => s.key === data.service);
+        return `<div><span class="ts-item-service">${escape(service?.label ?? "")}</span> ${escape(data.label)}</div>`;
+      },
+    },
+    onChange(value) {
+      if (!value) return;
+      const colonIndex = value.indexOf(":");
+      state.selectedServiceKey = value.slice(0, colonIndex);
+      state.selectedFunctionName = value.slice(colonIndex + 1);
+      renderSelectedFunction();
+    },
+  });
 
-function populateFunctionSelect() {
-  const selectedService = getSelectedService();
-
-  if (!selectedService || selectedService.functions.length === 0) {
-    elements.functionSelect.innerHTML = '<option value="">No functions available</option>';
-    return;
+  const firstService = state.catalog[0];
+  const firstFn = firstService?.functions[0];
+  if (firstFn) {
+    const initialValue = `${firstService.key}:${firstFn.functionName}`;
+    state.selectedServiceKey = firstService.key;
+    state.selectedFunctionName = firstFn.functionName;
+    tomSelectInstance.setValue(initialValue, true);
+    renderSelectedFunction();
   }
-
-  const selectedFunction =
-    selectedService.functions.find(
-      (functionEntry) => functionEntry.functionName === state.selectedFunctionName
-    ) || selectedService.functions[0];
-
-  state.selectedFunctionName = selectedFunction.functionName;
-  elements.functionSelect.innerHTML = selectedService.functions
-    .map(
-      (functionEntry) =>
-        `<option value="${escapeHtml(functionEntry.functionName)}"${functionEntry.functionName === state.selectedFunctionName ? " selected" : ""}>${escapeHtml(functionEntry.label)}</option>`
-    )
-    .join("");
 }
 
 function renderSelectedFunction() {
@@ -276,6 +385,7 @@ function renderSelectedFunction() {
   elements.mutationBar.hidden = entry.mutation !== true;
   elements.mutationConfirm.checked = false;
   elements.formFields.innerHTML = renderFieldMarkup(entry);
+  syncAllSelectPickers();
   updateRunAvailability(entry);
 }
 
@@ -382,29 +492,110 @@ function renderFieldControl(field, defaultValue) {
     `;
   }
 
+  const formattedDefaultValue = formatFieldValue(defaultValue, field);
+
   if (field.type === "textarea" || field.type === "json") {
     return `
       <textarea
         name="${name}"
         rows="${field.rows || 6}"
         placeholder="${escapeHtml(field.placeholder || "")}"
-      >${escapeHtml(formatFieldValue(defaultValue, field))}</textarea>
+      >${escapeHtml(formattedDefaultValue)}</textarea>
     `;
   }
 
   const inputType = field.type === "datetime-local" ? "datetime-local" : field.type;
   const valueAttribute =
     defaultValue !== undefined && defaultValue !== ""
-      ? ` value="${escapeHtml(formatFieldValue(defaultValue, field))}"`
+      ? ` value="${escapeHtml(formattedDefaultValue)}"`
       : "";
-
-  return `
+  const inputMarkup = `
     <input
       type="${escapeHtml(inputType)}"
       name="${name}"
       placeholder="${escapeHtml(field.placeholder || "")}"
       ${valueAttribute}
+      ${field.pickerOptions?.length ? 'data-select-text-input="true"' : ""}
     />
+  `;
+
+  if (!field.pickerOptions?.length) {
+    return inputMarkup;
+  }
+
+  return `${inputMarkup}${renderSelectPicker(field, formattedDefaultValue)}`;
+}
+
+function renderSelectPicker(field, defaultValue) {
+  const selectedValues = new Set(parseCommaSeparatedValues(defaultValue));
+  const recommendedValues = parseCommaSeparatedValues(
+    Array.isArray(field.recommendedValues) ? field.recommendedValues.join(",") : ""
+  );
+  const summaryText = formatSelectPickerSummary(
+    countKnownSelectedOptions(field.pickerOptions || [], selectedValues),
+    (field.pickerOptions || []).length,
+    countCustomSelectedValues(field.pickerOptions || [], selectedValues)
+  );
+
+  return `
+    <details
+      class="select-picker"
+      data-select-picker="true"
+      data-field-name="${escapeHtml(field.name)}"
+      data-recommended-values="${escapeHtml(recommendedValues.join(","))}"
+    >
+      <summary>
+        <span class="select-picker__title">Choose fields</span>
+        <span
+          class="select-picker__summary"
+          data-select-picker-summary="${escapeHtml(field.name)}"
+        >${escapeHtml(summaryText)}</span>
+      </summary>
+      <div class="select-picker__actions">
+        <button
+          type="button"
+          class="sample-button sample-button--quiet"
+          data-field-name="${escapeHtml(field.name)}"
+          data-select-picker-action="recommended"
+        >
+          Recommended
+        </button>
+        <button
+          type="button"
+          class="sample-button sample-button--quiet"
+          data-field-name="${escapeHtml(field.name)}"
+          data-select-picker-action="all"
+        >
+          All
+        </button>
+        <button
+          type="button"
+          class="sample-button sample-button--quiet"
+          data-field-name="${escapeHtml(field.name)}"
+          data-select-picker-action="clear"
+        >
+          Clear
+        </button>
+      </div>
+      <div class="select-picker__grid">
+        ${(field.pickerOptions || [])
+          .map(
+            (option) => `
+              <label class="select-picker__option">
+                <input
+                  type="checkbox"
+                  value="${escapeHtml(option.value)}"
+                  data-select-picker-input="true"
+                  data-field-name="${escapeHtml(field.name)}"
+                  ${selectedValues.has(option.value) ? "checked" : ""}
+                />
+                <span>${escapeHtml(option.label)}</span>
+              </label>
+            `
+          )
+          .join("")}
+      </div>
+    </details>
   `;
 }
 
@@ -470,6 +661,146 @@ function applySampleToField(fieldName, sampleIndex) {
   }
 
   control.value = formatFieldValue(sample.value, field);
+
+  if (field.pickerOptions?.length) {
+    syncPickerFromSelectInput(fieldName);
+  }
+}
+
+function syncAllSelectPickers() {
+  const selectInputs = elements.formFields.querySelectorAll("[data-select-text-input]");
+
+  for (const input of selectInputs) {
+    syncPickerFromSelectInput(input.name);
+  }
+}
+
+function applySelectPickerAction(fieldName, action) {
+  const input = getSelectTextInput(fieldName);
+  const picker = getSelectPicker(fieldName);
+
+  if (!input || !picker) {
+    return;
+  }
+
+  const optionValues = getSelectPickerOptionValues(picker);
+
+  if (action === "recommended") {
+    input.value = picker.dataset.recommendedValues || "";
+  } else if (action === "all") {
+    input.value = optionValues.join(",");
+  } else if (action === "clear") {
+    input.value = "";
+  }
+
+  syncPickerFromSelectInput(fieldName);
+}
+
+function syncSelectInputFromPicker(fieldName) {
+  const input = getSelectTextInput(fieldName);
+  const picker = getSelectPicker(fieldName);
+
+  if (!input || !picker) {
+    return;
+  }
+
+  const optionValues = new Set(getSelectPickerOptionValues(picker));
+  const checkedValues = [...picker.querySelectorAll("[data-select-picker-input]:checked")]
+    .map((checkbox) => checkbox.value)
+    .filter(Boolean);
+  const customValues = parseCommaSeparatedValues(input.value).filter(
+    (value) => !optionValues.has(value)
+  );
+
+  input.value = [...checkedValues, ...customValues].join(",");
+  updateSelectPickerSummary(fieldName);
+}
+
+function syncPickerFromSelectInput(fieldName) {
+  const input = getSelectTextInput(fieldName);
+  const picker = getSelectPicker(fieldName);
+
+  if (!input || !picker) {
+    return;
+  }
+
+  const selectedValues = new Set(parseCommaSeparatedValues(input.value));
+
+  for (const checkbox of picker.querySelectorAll("[data-select-picker-input]")) {
+    checkbox.checked = selectedValues.has(checkbox.value);
+  }
+
+  updateSelectPickerSummary(fieldName);
+}
+
+function updateSelectPickerSummary(fieldName) {
+  const picker = getSelectPicker(fieldName);
+  const summary = elements.formFields.querySelector(
+    `[data-select-picker-summary="${cssEscape(fieldName)}"]`
+  );
+
+  if (!picker || !summary) {
+    return;
+  }
+
+  const selectedValues = new Set(parseCommaSeparatedValues(getSelectTextInput(fieldName)?.value));
+  const optionValues = [...picker.querySelectorAll("[data-select-picker-input]")].map(
+    (checkbox) => checkbox.value
+  );
+  const selectedKnownCount = optionValues.filter((value) => selectedValues.has(value)).length;
+  const customCount = [...selectedValues].filter((value) => !optionValues.includes(value)).length;
+
+  summary.textContent = formatSelectPickerSummary(
+    selectedKnownCount,
+    optionValues.length,
+    customCount
+  );
+}
+
+function getSelectTextInput(fieldName) {
+  return elements.form.elements.namedItem(fieldName);
+}
+
+function getSelectPicker(fieldName) {
+  return elements.formFields.querySelector(
+    `[data-select-picker="true"][data-field-name="${cssEscape(fieldName)}"]`
+  );
+}
+
+function getSelectPickerOptionValues(picker) {
+  return [...picker.querySelectorAll("[data-select-picker-input]")].map((checkbox) => checkbox.value);
+}
+
+function parseCommaSeparatedValues(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function formatSelectPickerSummary(selectedKnownCount, totalCount, customCount) {
+  if (selectedKnownCount === 0 && customCount === 0) {
+    return `No fields selected (${totalCount} available)`;
+  }
+
+  if (customCount === 0) {
+    return `${selectedKnownCount} of ${totalCount} fields selected`;
+  }
+
+  return `${selectedKnownCount} of ${totalCount} fields selected, ${customCount} custom`;
+}
+
+function countKnownSelectedOptions(options, selectedValues) {
+  return (options || []).filter((option) => selectedValues.has(option.value)).length;
+}
+
+function countCustomSelectedValues(options, selectedValues) {
+  const optionValues = new Set((options || []).map((option) => option.value));
+  return [...selectedValues].filter((value) => !optionValues.has(value)).length;
 }
 
 function renderHealthState() {
@@ -677,6 +1008,22 @@ function renderObjectSections(entry, data) {
     `;
   }
 
+  if (entry.outputHint === "mimeContent") {
+    return `
+      <section class="result-section result-stack">
+        <div class="key-grid">
+          ${renderKeyValueItem("Status", data.status)}
+          ${renderKeyValueItem("Content type", data.contentType || "Unknown")}
+          ${renderKeyValueItem("Size", formatBytes(data.sizeBytes))}
+        </div>
+        <details class="raw-json">
+          <summary>MIME preview</summary>
+          <pre>${escapeHtml(data.preview || "No preview available.")}</pre>
+        </details>
+      </section>
+    `;
+  }
+
   return `
     <section class="result-section result-stack">
       <div class="key-grid">
@@ -723,7 +1070,26 @@ function renderPreviewCard(outputHint, item) {
     `;
   }
 
-  if (outputHint === "users" || outputHint === "user" || outputHint === "people") {
+  if (outputHint === "calendarList" || outputHint === "calendar") {
+    return `
+      <article class="preview-card">
+        <div class="preview-card__title">${escapeHtml(item.name || "(Unnamed calendar)")}</div>
+        <div class="preview-card__body">
+          ${escapeHtml(item.owner?.name || item.owner?.address || "Owner unavailable")}<br />
+          ${escapeHtml(item.canEdit === true ? "Editable" : "Read-only")}<br />
+          ${escapeHtml(item.isDefaultCalendar === true ? "Default calendar" : "Secondary calendar")}
+        </div>
+      </article>
+    `;
+  }
+
+  if (
+    outputHint === "users" ||
+    outputHint === "user" ||
+    outputHint === "person" ||
+    outputHint === "people" ||
+    outputHint === "directoryObjects"
+  ) {
     return `
       <article class="preview-card">
         <div class="preview-card__title">${escapeHtml(item.displayName || item.name || "(Unnamed person)")}</div>
@@ -731,6 +1097,24 @@ function renderPreviewCard(outputHint, item) {
           ${escapeHtml(item.mail || item.userPrincipalName || item.scoredEmailAddresses?.[0]?.address || "No email")}<br />
           ${escapeHtml(item.jobTitle || "No title")}<br />
           ${escapeHtml(item.officeLocation || "No office location")}
+        </div>
+      </article>
+    `;
+  }
+
+  if (
+    outputHint === "teams" ||
+    outputHint === "channels" ||
+    outputHint === "channel"
+  ) {
+    return `
+      <article class="preview-card">
+        <div class="preview-card__title">${escapeHtml(item.displayName || item.name || "(Unnamed team)")}</div>
+        <div class="preview-card__body">
+          ${escapeHtml(item.description || item.summary || "No description")}<br />
+          ${escapeHtml(item.membershipType || item.visibility || "Visibility unavailable")}<br />
+          ${escapeHtml(formatDateTime(item.createdDateTime))}<br />
+          ${escapeHtml(item.webUrl || "No web URL")}
         </div>
       </article>
     `;
@@ -751,6 +1135,56 @@ function renderPreviewCard(outputHint, item) {
           ${escapeHtml(item.from?.user?.displayName || item.createdBy?.user?.displayName || "Sender unavailable")}<br />
           ${escapeHtml(formatDateTime(item.createdDateTime || item.lastUpdatedDateTime))}<br />
           ${escapeHtml(stripHtml(item.body?.content || "").slice(0, 160) || "No preview available.")}
+        </div>
+      </article>
+    `;
+  }
+
+  if (outputHint === "attachments" || outputHint === "attachment") {
+    return `
+      <article class="preview-card">
+        <div class="preview-card__title">${escapeHtml(item.name || "(Unnamed attachment)")}</div>
+        <div class="preview-card__body">
+          ${escapeHtml(item.contentType || "Unknown content type")}<br />
+          ${escapeHtml(formatBytes(item.size || item.sizeBytes))}<br />
+          ${escapeHtml(formatDateTime(item.lastModifiedDateTime))}
+        </div>
+      </article>
+    `;
+  }
+
+  if (outputHint === "mailFolders" || outputHint === "mailFolder") {
+    return `
+      <article class="preview-card">
+        <div class="preview-card__title">${escapeHtml(item.displayName || "(Unnamed folder)")}</div>
+        <div class="preview-card__body">
+          ${escapeHtml(`Unread ${item.unreadItemCount ?? 0}`)}<br />
+          ${escapeHtml(`Total ${item.totalItemCount ?? 0}`)}<br />
+          ${escapeHtml(`Child folders ${item.childFolderCount ?? 0}`)}
+        </div>
+      </article>
+    `;
+  }
+
+  if (outputHint === "messageRules" || outputHint === "messageRule") {
+    return `
+      <article class="preview-card">
+        <div class="preview-card__title">${escapeHtml(item.displayName || "(Unnamed rule)")}</div>
+        <div class="preview-card__body">
+          ${escapeHtml(`Sequence ${item.sequence ?? "-"}`)}<br />
+          ${escapeHtml(item.isEnabled === true ? "Enabled" : "Disabled")}<br />
+          ${escapeHtml(item.isReadOnly === true ? "Read-only" : "Editable")}
+        </div>
+      </article>
+    `;
+  }
+
+  if (outputHint === "categories") {
+    return `
+      <article class="preview-card">
+        <div class="preview-card__title">${escapeHtml(item.displayName || "(Unnamed category)")}</div>
+        <div class="preview-card__body">
+          ${escapeHtml(item.color || "No color")}
         </div>
       </article>
     `;
@@ -1111,6 +1545,14 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function cssEscape(value) {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(String(value));
+  }
+
+  return String(value).replaceAll('"', '\\"');
 }
 
 function stripHtml(value) {

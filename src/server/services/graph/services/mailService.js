@@ -43,6 +43,26 @@ export async function listMyMessagesBasic(token, { top, filter, orderby, skip } 
 }
 
 /**
+ * List messages from the signed-in mailbox with caller-controlled $select.
+ * @scope Mail.ReadBasic or Mail.Read
+ */
+export async function listMessages(token, { top, select, filter, orderby, skip } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: "/me/messages",
+    token,
+    query: {
+      $top: top,
+      $select: select,
+      $filter: filter,
+      $orderby: orderby,
+      $skip: skip,
+    },
+  });
+  return data?.value ?? [];
+}
+
+/**
  * List inbox messages.
  * @scope Mail.ReadBasic or Mail.Read
  */
@@ -70,6 +90,19 @@ export async function getMessage(token, messageId, { select } = {}) {
 }
 
 /**
+ * Get MIME content for a message as a raw response.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function getMessageMime(token, messageId) {
+  return graphRequest({
+    method: "GET",
+    path: `/me/messages/${messageId}/$value`,
+    token,
+    binary: true,
+  });
+}
+
+/**
  * Full-text search across mail using the $search parameter.
  * @scope Mail.Read
  */
@@ -86,6 +119,39 @@ export async function searchMyMessages(token, searchText, { top, select } = {}) 
     headers: { ConsistencyLevel: "eventual" },
   });
   return data?.value ?? [];
+}
+
+/**
+ * List messages in a specific mail folder.
+ * @scope Mail.ReadBasic or Mail.Read
+ */
+export async function listMessagesInFolder(token, folderId, { top, select, filter, orderby, skip } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/me/mailFolders/${encodeURIComponent(folderId)}/messages`,
+    token,
+    query: {
+      $top: top,
+      $select: select,
+      $filter: filter,
+      $orderby: orderby,
+      $skip: skip,
+    },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Start or continue a delta query on a folder's messages.
+ * @scope Mail.Read
+ */
+export async function deltaMessages(token, folderId, { select, top } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/me/mailFolders/${encodeURIComponent(folderId)}/messages/delta`,
+    token,
+    query: { $select: select, $top: top },
+  });
 }
 
 /**
@@ -148,6 +214,115 @@ export async function listSharedInboxMessages(token, sharedMailbox, { top, selec
     path: `/users/${encodeURIComponent(sharedMailbox)}/mailFolders/inbox/messages`,
     token,
     query: { $top: top, $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * List mail folders for the signed-in mailbox.
+ * @scope Mail.ReadBasic or Mail.Read
+ */
+export async function listMailFolders(token, { top, select, filter } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: "/me/mailFolders",
+    token,
+    query: { $top: top, $select: select, $filter: filter },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Get a single mail folder by ID or well-known name.
+ * @scope Mail.ReadBasic or Mail.Read
+ */
+export async function getMailFolder(token, folderId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/me/mailFolders/${encodeURIComponent(folderId)}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List child folders for a mail folder.
+ * @scope Mail.ReadBasic or Mail.Read
+ */
+export async function listChildFolders(token, folderId, { top, select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/me/mailFolders/${encodeURIComponent(folderId)}/childFolders`,
+    token,
+    query: { $top: top, $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * List attachments for a message.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function listAttachments(token, messageId, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/me/messages/${messageId}/attachments`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Get a single message attachment.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function getAttachment(token, messageId, attachmentId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/me/messages/${messageId}/attachments/${attachmentId}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List Inbox message rules.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function listMessageRules(token, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: "/me/mailFolders/inbox/messageRules",
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Get one Inbox message rule.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function getMessageRule(token, messageRuleId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/me/mailFolders/inbox/messageRules/${encodeURIComponent(messageRuleId)}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List Outlook master categories.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function listOutlookCategories(token, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: "/me/outlook/masterCategories",
+    token,
+    query: { $select: select },
   });
   return data?.value ?? [];
 }
@@ -226,4 +401,30 @@ export async function createSharedMailboxDraft(token, sharedMailbox, draftInput)
     token,
     body: draftInput,
   });
+}
+
+/** @scope Mail.Read.Shared */
+export async function getSharedMailboxMessage(token, sharedMailbox, messageId, { select } = {}) {
+  return graphRequest({ method: "GET", path: `/users/${sharedMailbox}/messages/${messageId}`, token, query: { $select: select } });
+}
+
+/** @scope Mail.Read.Shared */
+export async function listSharedMailboxFolders(token, sharedMailbox, { top, select } = {}) {
+  const data = await graphRequest({ method: "GET", path: `/users/${sharedMailbox}/mailFolders`, token, query: { $top: top, $select: select } });
+  return data?.value ?? [];
+}
+
+/** @scope Mail.Send */
+export async function sendMail(token, messageInput) {
+  return graphRequest({ method: "POST", path: "/me/sendMail", token, body: { message: messageInput } });
+}
+
+/** @scope Mail.Send.Shared */
+export async function sendSharedMailboxMail(token, sharedMailbox, messageInput) {
+  return graphRequest({ method: "POST", path: `/users/${sharedMailbox}/sendMail`, token, body: { message: messageInput } });
+}
+
+/** @scope Mail.ReadWrite.Shared */
+export async function updateSharedMailboxMessage(token, sharedMailbox, messageId, patch) {
+  return graphRequest({ method: "PATCH", path: `/users/${sharedMailbox}/messages/${messageId}`, token, body: patch });
 }

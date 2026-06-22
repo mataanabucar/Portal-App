@@ -93,6 +93,61 @@ export async function getUser(token, userIdOrUpn, { select } = {}) {
 }
 
 /**
+ * Get a user's manager.
+ * @scope User.Read.All or User.ReadBasic.All
+ */
+export async function getUserManager(token, userIdOrUpn, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/users/${encodeURIComponent(userIdOrUpn)}/manager`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List direct reports for a user.
+ * @scope User.Read.All or User.ReadBasic.All
+ */
+export async function listUserDirectReports(token, userIdOrUpn, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/users/${encodeURIComponent(userIdOrUpn)}/directReports`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * List joined Teams teams for a user.
+ * @scope Team.ReadBasic.All or Team.Read.All
+ */
+export async function listUserJoinedTeams(token, userIdOrUpn, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/users/${encodeURIComponent(userIdOrUpn)}/joinedTeams`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * List directory memberships for a user.
+ * @scope GroupMember.Read.All or Directory.Read.All
+ */
+export async function listUserMemberOf(token, userIdOrUpn, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/users/${encodeURIComponent(userIdOrUpn)}/memberOf`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
  * Update writable profile properties for any user.
  * @scope User.ReadWrite
  * @param {object} patch  Only include fields you want to change

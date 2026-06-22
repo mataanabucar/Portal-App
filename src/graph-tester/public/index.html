@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Microsoft Graph Tester</title>
     <link rel="stylesheet" href="/app.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -53,18 +54,13 @@
             </div>
 
             <label class="field">
-              <span class="field__label">Service</span>
-              <select id="service-select"></select>
+              <span class="field__label">Function</span>
+              <select id="function-select" placeholder="Search functions..."></select>
             </label>
 
             <p class="field-note" id="service-description">
-              Select a service to inspect its available Graph functions.
+              Search by name or browse by service group.
             </p>
-
-            <label class="field">
-              <span class="field__label">Function</span>
-              <select id="function-select"></select>
-            </label>
 
             <div class="function-card">
               <div class="function-card__header">
@@ -132,6 +128,7 @@
       </main>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

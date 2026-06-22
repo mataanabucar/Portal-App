@@ -65,6 +65,7 @@ export function buildConfig(overrides = {}) {
     openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
     summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, "teamgpt"),
     askProvider: normalizeAiProvider(process.env.ASK_PROVIDER, "teamgpt"),
+    parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, "teamgpt"),
     teamGptPageUrl:
       process.env.TEAMGPT_PAGE_URL ||
       "https://tools.benchmarkdigital.com/gsportal/genai/index.cfm",
@@ -75,6 +76,12 @@ export function buildConfig(overrides = {}) {
     teamGptEnvironment: process.env.TEAMGPT_ENVIRONMENT || "prod",
     teamGptModel:
       process.env.TEAMGPT_MODEL || "anthropic.claude-haiku-4-5-20251001-v1:0",
+    teamGptParserModel:
+      process.env.TEAMGPT_PARSER_MODEL ||
+      "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    teamGptParserEndpointUrl:
+      process.env.TEAMGPT_PARSER_ENDPOINT_URL ||
+      "https://genai-proxy-na.benchmarkdigital.com/bedrock/converse/chat/teamgpt-ask-anything-bedrock?stream=false",
 
     // Sourcebot
     sourcebotHost:   process.env.SOURCEBOT_HOST    || "",

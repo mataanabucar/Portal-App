@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 // at build time and cannot honor the desktop shell's dynamic BACKEND_URL.
 
 const nextConfig: NextConfig = {
+  output: "standalone",
   // Pin the workspace root to this app (multiple lockfiles exist in the repo).
   turbopack: {
     root: fileURLToPath(new URL(".", import.meta.url)),

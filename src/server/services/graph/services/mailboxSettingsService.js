@@ -13,8 +13,13 @@ import { graphRequest } from "../graphRequest.js";
  * Returns: timeZone, language, automaticRepliesSetting, dateFormat,
  *          timeFormat, workingHours, delegateMeetingMessageDeliveryOptions
  */
-export async function getMyMailboxSettings(token) {
-  return graphRequest({ method: "GET", path: "/me/mailboxSettings", token });
+export async function getMyMailboxSettings(token, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: "/me/mailboxSettings",
+    token,
+    query: { $select: select },
+  });
 }
 
 /**

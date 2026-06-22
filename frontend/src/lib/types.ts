@@ -146,6 +146,7 @@ export interface DashboardRequest {
   focus?: string;
   parserFocus?: string;
   parserTestchat?: boolean;
+  parserProvider?: "teamgpt" | "openai";
   model?: string;
 }
 
@@ -162,6 +163,7 @@ export interface HealthResponse {
     };
     parser: {
       enabled: boolean;
+      provider?: string;
       model: string;
       reason?: string | null;
       testchatAllowed: boolean;

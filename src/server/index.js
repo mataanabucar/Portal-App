@@ -23,7 +23,7 @@ export function startServer(overrides = {}) {
     config,
     portalService,
     summarizer: createSummarizer(config, { teamGptAuthService }),
-    parser: createPortalParser(config),
+    parser: createPortalParser(config, { teamGptAuthService }),
     asker: createAskService(config, { teamGptAuthService }),
     graphAuth,
     emailContextSummarizer: createEmailContextSummarizer(config),

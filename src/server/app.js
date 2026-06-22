@@ -156,7 +156,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             emailContextSummarizer,
             focus: request.body?.focus,
             testchat: request.body?.testchat === true,
-            model: request.body?.model
+            model: request.body?.model,
+            provider: request.body?.parserProvider
           });
 
           response.json(payload);
@@ -305,7 +306,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             summaryProvider: request.body?.summaryProvider,
             parserFocus: request.body?.parserFocus,
             parserTestchat: request.body?.parserTestchat === true,
-            model: request.body?.model
+            model: request.body?.model,
+            parserProvider: request.body?.parserProvider
           });
 
           response.json(payload);
@@ -397,7 +399,9 @@ async function respondWithRuntime(
   const runtimeSummarizer = createSummarizer(effectiveConfig, {
     teamGptAuthService: runtimeTeamGptAuthService
   });
-  const runtimeParser = createPortalParser(effectiveConfig);
+  const runtimeParser = createPortalParser(effectiveConfig, {
+    teamGptAuthService: runtimeTeamGptAuthService
+  });
   const runtimeAsker = createAskService(effectiveConfig, {
     teamGptAuthService: runtimeTeamGptAuthService
   });
@@ -444,14 +448,16 @@ async function buildParserPayload({
   emailContextSummarizer,
   focus,
   testchat,
-  model
+  model,
+  provider
 }) {
   const snapshot = await portalService.fetchSnapshot();
   await tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot);
   const parsed = await parser.parseSnapshot(snapshot, {
     focus,
     testchat,
-    model
+    model,
+    provider
   });
 
   return {
@@ -479,7 +485,8 @@ async function buildDashboardPayload({
   summaryProvider,
   parserFocus,
   parserTestchat,
-  model
+  model,
+  parserProvider
 }) {
   const snapshot = await portalService.fetchSnapshot();
   await tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot);
@@ -492,7 +499,8 @@ async function buildDashboardPayload({
     parser.parseSnapshot(snapshot, {
       focus: parserFocus,
       testchat: parserTestchat,
-      model
+      model,
+      provider: parserProvider
     })
   ]);
 

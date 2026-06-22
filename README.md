@@ -490,10 +490,13 @@ npm run graph-tester
 npm run graph-tester:dev
 npm run pack:win
 npm run dist:win
+npm run bundle:localhost
 npm run smoke
 ```
 
 `npm run smoke` now validates mock mode, raw HTML mode, iframe mode, cookie-backed mode, and browser-backed mode when a local Chrome-family browser is available.
+
+`npm run bundle:localhost` creates a smaller browser-based shareable ZIP under `dist/localhost-shareable/` that runs the app on localhost with Node.js instead of Electron.
 
 ## File layout
 

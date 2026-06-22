@@ -47,9 +47,27 @@ export async function getChat(token, chatId, { select } = {}) {
  * List members of a chat.
  * @scope Chat.ReadBasic, Chat.Read, or Chat.ReadWrite
  */
-export async function listChatMembers(token, chatId) {
-  const data = await graphRequest({ method: "GET", path: `/chats/${chatId}/members`, token });
+export async function listChatMembers(token, chatId, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/members`,
+    token,
+    query: { $select: select },
+  });
   return data?.value ?? [];
+}
+
+/**
+ * Get a single chat member.
+ * @scope Chat.ReadBasic, Chat.Read, or Chat.ReadWrite
+ */
+export async function getChatMember(token, chatId, membershipId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/members/${membershipId}`,
+    token,
+    query: { $select: select },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -136,8 +154,74 @@ export async function listAllChatMessages(token, chatId) {
  * Get a single message from a chat.
  * @scope ChatMessage.Read, Chat.Read, or Chat.ReadWrite
  */
-export async function getChatMessage(token, chatId, messageId) {
-  return graphRequest({ method: "GET", path: `/chats/${chatId}/messages/${messageId}`, token });
+export async function getChatMessage(token, chatId, messageId, { select } = {}) {
+  return graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/messages/${messageId}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List hosted contents for a chat message.
+ * @scope ChatMessage.Read
+ */
+export async function listChatMessageHostedContents(token, chatId, messageId, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/messages/${messageId}/hostedContents`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * Get one hosted content item from a chat message.
+ * @scope ChatMessage.Read
+ */
+export async function getChatMessageHostedContent(
+  token,
+  chatId,
+  messageId,
+  hostedContentId,
+  { select } = {}
+) {
+  return graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/messages/${messageId}/hostedContents/${hostedContentId}`,
+    token,
+    query: { $select: select },
+  });
+}
+
+/**
+ * List tabs for a chat.
+ * @scope TeamsTab.Read.All
+ */
+export async function listChatTabs(token, chatId, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/tabs`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
+}
+
+/**
+ * List installed apps for a chat.
+ * @scope TeamsAppInstallation.ReadForChat
+ */
+export async function listChatInstalledApps(token, chatId, { select } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: `/chats/${chatId}/installedApps`,
+    token,
+    query: { $select: select },
+  });
+  return data?.value ?? [];
 }
 
 /**
