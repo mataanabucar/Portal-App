@@ -31,9 +31,12 @@ function buildItemContext(item: DashboardCardItem): string {
     item.nextAction && `Next Action: ${item.nextAction}`,
     item.blockersOpenQuestions.length > 0 &&
       `Blockers: ${item.blockersOpenQuestions.join("; ")}`,
+    kd("Related Action Item") && `Related Action Item: ${kd("Related Action Item")}`,
     kd("Application") && `Application: ${kd("Application")}`,
+    kd("Request Type") && `Request Type: ${kd("Request Type")}`,
     kd("Request ID") && `Request ID: ${kd("Request ID")}`,
     kd("Business / Customer") && `Customer: ${kd("Business / Customer")}`,
+    kd("References / Fields") && `References / Fields: ${kd("References / Fields")}`,
   ].filter(Boolean);
 
   return lines.join("\n");
