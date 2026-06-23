@@ -11,12 +11,12 @@ import {
 import { normalizePortalSummaryBatch } from "./portalSummaryNormalizer.js";
 
 const RESPONSE_VERSION = "2026-06-portal-parse-v4";
-const TEAMGPT_PARSER_TONE = "Authoritative + Professional";
+const TEAMGPT_PARSER_TONE = "Professional + Straightforward";
 const TEAMGPT_PARSER_WORD_LIMIT = 2500;
 const TEAMGPT_TESTCHAT_WORD_LIMIT = 1600;
 const TEAMGPT_PARSER_ADDITIONAL_FIELDS = {
   large_context_model: "on",
-  extended_thinking: "off",
+  extended_thinking: "on",
   rememberConvo: "off",
   enterIsSend: "on"
 };
@@ -77,7 +77,8 @@ async function parseWithOpenAi(config, client, snapshot, options) {
     model,
     originalText,
     testchat,
-    focus: options.focus
+    focus: options.focus,
+    tone: options.tone
   });
   const response = await client.responses.create(request, { maxRetries: 0 });
 
@@ -131,15 +132,19 @@ async function parseWithTeamGpt(config, client, snapshot, options) {
   const model = resolveModel(config, "teamgpt", options.model);
   const testchat = isTestchatEnabled(config, "teamgpt", options.testchat);
   const instructions = testchat
-    ? buildPortalParserInstructions({ testchat: true, focus: options.focus })
-    : buildTeamGptStructuredInstructions(options.focus);
+    ? buildPortalParserInstructions({
+        testchat: true,
+        focus: options.focus,
+        tone: options.tone
+      })
+    : buildTeamGptStructuredInstructions(options.focus, options.tone);
   const response = await client.completeText({
     endpointUrl: resolveTeamGptParserEndpointUrl(config),
     instructions,
     prompt: originalText,
     model,
     wordLimit: testchat ? TEAMGPT_TESTCHAT_WORD_LIMIT : TEAMGPT_PARSER_WORD_LIMIT,
-    tone: TEAMGPT_PARSER_TONE,
+    tone: resolveParserTone(options.tone),
     format: "any",
     temperature: 0,
     additionalModelRequestFields: TEAMGPT_PARSER_ADDITIONAL_FIELDS
@@ -229,10 +234,11 @@ function parseStructuredOutput(outputText) {
   throw parseError;
 }
 
-function buildTeamGptStructuredInstructions(focus) {
+function buildTeamGptStructuredInstructions(focus, tone) {
   const baseInstructions = buildPortalParserInstructions({
     testchat: false,
-    focus
+    focus,
+    tone
   });
 
   return [
@@ -339,4 +345,8 @@ function assertCompleted(response) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveParserTone(value) {
+  return normalizeText(value) || TEAMGPT_PARSER_TONE;
 }

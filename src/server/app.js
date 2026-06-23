@@ -18,6 +18,7 @@ import {
 } from "./services/testerConfig.js";
 import { findItemEmail } from "./services/graph/services/itemEmailService.js";
 import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
+import { registerKbDebugRoutes } from "./services/kb/debugRoutes.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
@@ -26,7 +27,7 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, sourcebotService, teamGptAuthService }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, sourcebotService, teamGptAuthService }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -62,6 +63,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
               summarizer: runtimeSummarizer.describe(),
               parser: runtimeParser.describe(),
               ask: runtimeAsker.describe(),
+              kb: kbService?.describe() ?? { enabled: false },
               sourcebot: sourcebotService?.describe() ?? { enabled: false }
             },
             testing: {
@@ -126,7 +128,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             summarizer: runtimeSummarizer,
             includeSummary: request.body?.includeSummary === true,
             focus: request.body?.focus,
-            summaryProvider: request.body?.summaryProvider
+            summaryProvider: request.body?.summaryProvider,
+            summaryTone: request.body?.summaryTone
           });
 
           response.json(payload);
@@ -157,7 +160,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             focus: request.body?.focus,
             testchat: request.body?.testchat === true,
             model: request.body?.model,
-            provider: request.body?.parserProvider
+            provider: request.body?.parserProvider,
+            tone: request.body?.summaryTone ?? request.body?.tone
           });
 
           response.json(payload);
@@ -304,6 +308,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             includeSummary: request.body?.includeSummary !== false,
             focus: request.body?.focus,
             summaryProvider: request.body?.summaryProvider,
+            summaryTone: request.body?.summaryTone,
             parserFocus: request.body?.parserFocus,
             parserTestchat: request.body?.parserTestchat === true,
             model: request.body?.model,
@@ -343,8 +348,14 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
 
   app.post("/api/item/research", async (request, response, next) => {
     try {
-      if (!sourcebotService?.enabled) {
-        response.status(503).json({ ok: false, error: "Sourcebot is not configured." });
+      const canUseSourcebot = Boolean(sourcebotService?.enabled);
+      const kbStatus = kbService?.describe?.() ?? { enabled: false, authConfigured: false };
+      const canUseKb =
+        Boolean(kbStatus.enabled) &&
+        Boolean(kbStatus.authConfigured || request.headers.authorization);
+
+      if (!canUseSourcebot && !canUseKb) {
+        response.status(503).json({ ok: false, error: "Neither Sourcebot nor Knowledge Base research is configured." });
         return;
       }
 
@@ -356,18 +367,30 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
 
       const result = await runResearchPipeline({
         sourcebotService,
+        kbService,
         config,
         itemContext,
         userQuery: query.trim(),
         messages,
+        teamGptAuthService,
+        kbAuthToken: request.headers.authorization,
       });
 
-      response.json({ ok: true, answer: result.answer, chatUrl: result.chatUrl, retrievalTrail: result.retrievalTrail });
+      response.json({
+        ok: true,
+        report: result.report,
+        codeFindings: result.codeFindings,
+        kbFindings: result.kbFindings,
+        chatUrl: result.chatUrl,
+        retrievalTrail: result.retrievalTrail,
+      });
     } catch (error) {
       console.error("[/api/item/research]", error);
       next(error);
     }
   });
+
+  registerKbDebugRoutes(app, kbService);
 
   app.use((error, request, response, next) => {
     response.status(error.statusCode || 500).json({
@@ -426,12 +449,14 @@ async function buildPreviewPayload({
   summarizer,
   includeSummary,
   focus,
-  summaryProvider
+  summaryProvider,
+  summaryTone
 }) {
   const snapshot = await portalService.fetchSnapshot();
   const summary = includeSummary
     ? await summarizer.summarize(snapshot, focus, {
-        provider: summaryProvider
+        provider: summaryProvider,
+        tone: summaryTone
       })
     : null;
 
@@ -449,7 +474,8 @@ async function buildParserPayload({
   focus,
   testchat,
   model,
-  provider
+  provider,
+  tone
 }) {
   const snapshot = await portalService.fetchSnapshot();
   await tryEnrichSnapshot(graphAuth, emailContextSummarizer, snapshot);
@@ -457,7 +483,8 @@ async function buildParserPayload({
     focus,
     testchat,
     model,
-    provider
+    provider,
+    tone
   });
 
   return {
@@ -483,6 +510,7 @@ async function buildDashboardPayload({
   includeSummary,
   focus,
   summaryProvider,
+  summaryTone,
   parserFocus,
   parserTestchat,
   model,
@@ -493,14 +521,16 @@ async function buildDashboardPayload({
   const [summary, parsed] = await Promise.all([
     includeSummary
       ? summarizer.summarize(snapshot, focus, {
-          provider: summaryProvider
+          provider: summaryProvider,
+          tone: summaryTone
         })
       : Promise.resolve(null),
     parser.parseSnapshot(snapshot, {
       focus: parserFocus,
       testchat: parserTestchat,
       model,
-      provider: parserProvider
+      provider: parserProvider,
+      tone: summaryTone
     })
   ]);
 

@@ -10,6 +10,7 @@ import {
 } from "./services/ai/index.js";
 import { createPortalService } from "./services/portal/index.js";
 import { createPortalGraphAuth } from "./services/graph/portalGraphAuth.js";
+import { createKbService } from "./services/kb/index.js";
 import { createSourcebotService } from "./services/sourcebot/index.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
@@ -17,8 +18,9 @@ export function startServer(overrides = {}) {
   const config = buildConfig(overrides);
   const portalService = createPortalService(config);
   const graphAuth = createPortalGraphAuth(config);
-  const sourcebotService = createSourcebotService(config);
   const teamGptAuthService = createTeamGptAuthService(config);
+  const kbService = createKbService(config, { teamGptAuthService });
+  const sourcebotService = createSourcebotService(config);
   const app = createApp({
     config,
     portalService,
@@ -27,6 +29,7 @@ export function startServer(overrides = {}) {
     asker: createAskService(config, { teamGptAuthService }),
     graphAuth,
     emailContextSummarizer: createEmailContextSummarizer(config),
+    kbService,
     sourcebotService,
     teamGptAuthService,
   });

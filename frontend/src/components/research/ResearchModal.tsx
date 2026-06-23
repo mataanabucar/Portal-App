@@ -1,13 +1,38 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { X, Send, ExternalLink, ChevronDown, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  X,
+  Send,
+  ExternalLink,
+  ChevronDown,
+  Search,
+  AlertTriangle,
+  CheckCircle2,
+  Rocket,
+  ShieldAlert,
+  User,
+  FileText,
+  BarChart3,
+  Code2,
+  BookOpen,
+  HelpCircle,
+  ListChecks,
+  Info,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
+import { readLocal, writeLocal } from "@/lib/storage";
 import { api } from "@/lib/api";
-import type { DashboardCardItem, ResearchMessage, RetrievalStep } from "@/lib/types";
+import type {
+  DashboardCardItem,
+  ResearchFinding,
+  ResearchMessage,
+  ResearchReport,
+  RetrievalStep,
+} from "@/lib/types";
 
 interface ResearchModalProps {
   open: boolean;
@@ -15,11 +40,7 @@ interface ResearchModalProps {
   item: DashboardCardItem;
 }
 
-interface ThreadMessage {
-  role: "user" | "assistant";
-  content: string;
-  retrievalTrail?: RetrievalStep[];
-}
+type TabId = "overview" | "code" | "kb" | "missing" | "actions";
 
 function buildItemContext(item: DashboardCardItem): string {
   const kd = (label: string) =>
@@ -42,7 +63,7 @@ function buildItemContext(item: DashboardCardItem): string {
   return lines.join("\n");
 }
 
-function buildInitialQuery(item: DashboardCardItem): string {
+function buildInitialQuery(): string {
   return (
     `Research this portal item and help me understand how to resolve it.\n\n` +
     `Find relevant code, existing feature implementations, known limitations, ` +
@@ -50,18 +71,31 @@ function buildInitialQuery(item: DashboardCardItem): string {
   );
 }
 
+function keyDetail(item: DashboardCardItem, ...labels: string[]): string {
+  for (const label of labels) {
+    const value = item.keyDetails.find((r) => r.label === label)?.value ?? "";
+    if (value && value.toLowerCase() !== "not visible") return value;
+  }
+  return "";
+}
+
 export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
-  const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  const [report, setReport] = useState<ResearchReport | null>(null);
+  const [codeFindings, setCodeFindings] = useState<ResearchFinding[]>([]);
+  const [kbFindings, setKbFindings] = useState<ResearchFinding[]>([]);
+  const [retrievalTrail, setRetrievalTrail] = useState<RetrievalStep[]>([]);
+  const [messages, setMessages] = useState<ResearchMessage[]>([]);
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState(0);
-  const [lastChatUrl, setLastChatUrl] = useState<string | null>(null);
+  const [chatUrl, setChatUrl] = useState<string | null>(null);
   const crawlRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const threadRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const itemContext = buildItemContext(item);
+  const itemContext = useMemo(() => buildItemContext(item), [item]);
 
-  // Crawl animation while loading
+  // Crawl animation while loading.
   useEffect(() => {
     if (loading) {
       setLoadProgress(0);
@@ -70,57 +104,51 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
       }, 120);
     } else {
       if (crawlRef.current) clearInterval(crawlRef.current);
-      if (messages.length > 0) setLoadProgress(100);
+      if (report) setLoadProgress(100);
     }
-    return () => { if (crawlRef.current) clearInterval(crawlRef.current); };
-  }, [loading, messages.length]);
+    return () => {
+      if (crawlRef.current) clearInterval(crawlRef.current);
+    };
+  }, [loading, report]);
 
-  // Auto-scroll thread to bottom
-  useEffect(() => {
-    if (threadRef.current) {
-      threadRef.current.scrollTop = threadRef.current.scrollHeight;
-    }
-  }, [messages, loading]);
-
-  // Fire initial query when modal opens
+  // Fire the initial research run when the modal opens.
   useEffect(() => {
     if (!open) return;
+    setReport(null);
+    setCodeFindings([]);
+    setKbFindings([]);
+    setRetrievalTrail([]);
     setMessages([]);
+    setActiveTab("overview");
     setInput("");
-    setLastChatUrl(null);
-    setLoadProgress(0);
-    sendMessage(buildInitialQuery(item), []);
+    setError(null);
+    setChatUrl(null);
+    runResearch(buildInitialQuery(), []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Focus input after first response
   useEffect(() => {
-    if (!loading && messages.length > 0) {
-      inputRef.current?.focus();
-    }
-  }, [loading, messages.length]);
+    if (!loading && report) inputRef.current?.focus();
+  }, [loading, report]);
 
-  async function sendMessage(query: string, history: ThreadMessage[]) {
+  async function runResearch(query: string, history: ResearchMessage[]) {
     setLoading(true);
-    // Build the ResearchMessage history (strip retrievalTrail)
-    const apiHistory: ResearchMessage[] = history.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    setError(null);
     try {
-      const res = await api.research({ query, messages: apiHistory, itemContext });
-      if (res.chatUrl) setLastChatUrl(res.chatUrl);
-      setMessages((prev) => [
-        ...prev,
+      const res = await api.research({ query, messages: history, itemContext });
+      setReport(res.report);
+      setCodeFindings(res.codeFindings ?? []);
+      setKbFindings(res.kbFindings ?? []);
+      setRetrievalTrail(res.retrievalTrail ?? []);
+      if (res.chatUrl) setChatUrl(res.chatUrl);
+      setActiveTab("overview");
+      setMessages([
+        ...history,
         { role: "user", content: query },
-        { role: "assistant", content: res.answer, retrievalTrail: res.retrievalTrail },
+        { role: "assistant", content: res.report?.summaryOfIssue || "" },
       ]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: query },
-        { role: "assistant", content: `Error: ${(err as Error).message}` },
-      ]);
+      setError((err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -130,7 +158,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
     const q = input.trim();
     if (!q || loading) return;
     setInput("");
-    sendMessage(q, messages);
+    runResearch(q, messages);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -142,34 +170,35 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
 
   if (!open) return null;
 
+  const showReport = !loading && report;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
     >
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" />
 
-      {/* Modal */}
-      <div className="relative z-10 flex flex-col w-full max-w-2xl h-[82vh] bg-[#0f1623] border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden">
-
+      <div className="relative z-10 flex flex-col w-full max-w-4xl h-[90vh] bg-[#0a0e1a] border border-slate-700/60 rounded-2xl shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50 shrink-0">
-          <div className="min-w-0 flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-full flex items-center justify-center bg-violet-950/50 border border-violet-700/30 shrink-0">
-              <Search className="w-3.5 h-3.5 text-violet-400" />
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800/70 shrink-0">
+          <div className="min-w-0 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-violet-950/60 border border-violet-700/40 shrink-0">
+              <Search className="w-4 h-4 text-violet-400" />
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-semibold tracking-widest text-violet-400 uppercase mb-0.5">
-                Sourcebot Research
+              <p className="text-[0.7rem] font-semibold tracking-[0.2em] text-violet-400 uppercase">
+                Code + KB Research
               </p>
-              <p className="text-sm text-slate-300 truncate">{item.title}</p>
+              <p className="text-sm font-semibold text-slate-200 truncate">{item.title}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 ml-4 shrink-0">
-            {lastChatUrl && (
+          <div className="flex items-center gap-3 ml-4 shrink-0">
+            {chatUrl && (
               <a
-                href={lastChatUrl}
+                href={chatUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-slate-400 hover:text-violet-300 transition-colors"
@@ -187,37 +216,57 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
           </div>
         </div>
 
-        {/* Thread */}
-        <div ref={threadRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {messages.map((msg, i) => (
-            <MessageBubble key={i} message={msg} />
-          ))}
-          {loading && messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="flex flex-col items-center justify-center h-full gap-4 py-20">
               <PillProgress3D
                 progress={loadProgress}
-                label="RESEARCHING CODEBASE..."
-                width={380}
-                height={52}
+                label="RESEARCHING CODE + KB..."
+                width={400}
+                height={54}
               />
-              <p className="text-xs text-slate-500">Searching Benchmark Digital repos…</p>
+              <p className="text-xs text-slate-500">Searching Benchmark Digital repos and Knowledge Base…</p>
             </div>
           )}
-          {loading && messages.length > 0 && (
-            <div className="flex justify-start">
-              <div className="bg-slate-800/60 border border-slate-700/40 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[85%]">
-                <div className="flex items-center gap-2 text-slate-400 text-sm">
-                  <span className="animate-pulse">●</span>
-                  <span className="animate-pulse" style={{ animationDelay: "0.2s" }}>●</span>
-                  <span className="animate-pulse" style={{ animationDelay: "0.4s" }}>●</span>
-                </div>
-              </div>
+
+          {!loading && error && (
+            <div className="p-6">
+              <p className="text-sm text-red-400 bg-red-950/30 border border-red-800/40 rounded-xl px-4 py-3">
+                {error}
+              </p>
+            </div>
+          )}
+
+          {showReport && (
+            <div className="px-6 py-5 space-y-5">
+              <QuickTake report={report} />
+              <StatusCards item={item} report={report} />
+              <Tabs
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                codeCount={codeFindings.length}
+                kbCount={kbFindings.length}
+                missingCount={report.whatIsMissing.length}
+                actionCount={report.actionItems.length}
+              />
+              <TabContent
+                activeTab={activeTab}
+                report={report}
+                codeFindings={codeFindings}
+                kbFindings={kbFindings}
+                retrievalTrail={retrievalTrail}
+                itemId={item.id}
+              />
             </div>
           )}
         </div>
 
-        {/* Input bar */}
-        <div className="shrink-0 border-t border-slate-700/50 px-4 py-3 flex items-end gap-3">
+        {/* Follow-up input */}
+        <div className="shrink-0 border-t border-slate-800/70 px-4 py-3 flex items-end gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-950/60 border border-violet-700/40 shrink-0">
+            <Search className="w-3.5 h-3.5 text-violet-400" />
+          </div>
           <textarea
             ref={inputRef}
             value={input}
@@ -226,7 +275,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
             placeholder="Ask a follow-up question…"
             disabled={loading}
             rows={1}
-            className="flex-1 resize-none bg-slate-800/60 border border-slate-600/50 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500/60 disabled:opacity-40 max-h-28 overflow-y-auto"
+            className="flex-1 resize-none bg-slate-900/70 border border-slate-700/60 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-500/60 disabled:opacity-40 max-h-28 overflow-y-auto"
             style={{ lineHeight: "1.5" }}
           />
           <Button
@@ -243,70 +292,449 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
   );
 }
 
-function MessageBubble({ message }: { message: ThreadMessage }) {
-  const isUser = message.role === "user";
+// ── Quick Take ────────────────────────────────────────────────────────────────
 
-  if (isUser) {
+function QuickTake({ report }: { report: ResearchReport }) {
+  const { quickTake } = report;
+  if (!quickTake.issue && !quickTake.whatWeKnow && !quickTake.nextStep) return null;
+
+  return (
+    <div className="rounded-2xl border border-violet-800/40 bg-violet-950/20 p-4 flex gap-4">
+      <div className="w-10 h-10 rounded-xl bg-violet-900/50 border border-violet-700/40 flex items-center justify-center shrink-0">
+        <Search className="w-4 h-4 text-violet-300" />
+      </div>
+      <div className="min-w-0 space-y-2">
+        <p className="text-[0.7rem] font-semibold tracking-[0.2em] text-violet-300 uppercase">
+          Quick Take
+        </p>
+        {quickTake.issue && (
+          <QuickTakeRow icon={<AlertTriangle className="w-4 h-4 text-amber-400" />} label="Issue" text={quickTake.issue} />
+        )}
+        {quickTake.whatWeKnow && (
+          <QuickTakeRow icon={<CheckCircle2 className="w-4 h-4 text-cyan-400" />} label="What we know" text={quickTake.whatWeKnow} />
+        )}
+        {quickTake.nextStep && (
+          <QuickTakeRow icon={<Rocket className="w-4 h-4 text-violet-300" />} label="Next step" text={quickTake.nextStep} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QuickTakeRow({ icon, label, text }: { icon: React.ReactNode; label: string; text: string }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <span className="mt-0.5 shrink-0">{icon}</span>
+      <p className="text-sm text-slate-300 leading-relaxed">
+        <span className="font-semibold text-slate-100">{label}:</span> {text}
+      </p>
+    </div>
+  );
+}
+
+// ── Status cards ────────────────────────────────────────────────────────────────
+
+function StatusCards({ item, report }: { item: DashboardCardItem; report: ResearchReport }) {
+  const owner = keyDetail(item, "Assigned Lead", "Requester") || "Unassigned";
+  const requestType = keyDetail(item, "Request Type") || "—";
+  const statusColor = statusToneColor(item.status.label);
+  const conf = report.confidence;
+
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <StatusCard
+        icon={<ShieldAlert className={`w-4 h-4 ${statusColor.text}`} />}
+        label="Status"
+        value={
+          <span className="flex items-center gap-1.5">
+            {item.status.label || "—"}
+            <span className={`w-1.5 h-1.5 rounded-full ${statusColor.dot}`} />
+          </span>
+        }
+      />
+      <StatusCard icon={<User className="w-4 h-4 text-cyan-400" />} label="Owner" value={owner} />
+      <StatusCard icon={<FileText className="w-4 h-4 text-slate-400" />} label="Request Type" value={requestType} />
+      <StatusCard
+        icon={<BarChart3 className={`w-4 h-4 ${confidenceColor(conf.level).text}`} />}
+        label="Confidence"
+        value={
+          <span className="flex flex-col">
+            <span className={confidenceColor(conf.level).text}>{conf.level}</span>
+            <span className="text-[0.65rem] font-normal text-slate-500">
+              {conf.criticalGaps} critical gap{conf.criticalGaps !== 1 ? "s" : ""}
+            </span>
+          </span>
+        }
+      />
+    </div>
+  );
+}
+
+function StatusCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3">
+      <div className="flex items-center gap-2 mb-1.5">
+        {icon}
+        <span className="text-[0.65rem] font-medium tracking-wide text-slate-500 uppercase">{label}</span>
+      </div>
+      <div className="text-sm font-semibold text-slate-200 truncate">{value}</div>
+    </div>
+  );
+}
+
+// ── Tabs ────────────────────────────────────────────────────────────────────────
+
+const TAB_META: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: "overview", label: "Overview", icon: <Info className="w-3.5 h-3.5" /> },
+  { id: "code", label: "Code Findings", icon: <Code2 className="w-3.5 h-3.5" /> },
+  { id: "kb", label: "KB Findings", icon: <BookOpen className="w-3.5 h-3.5" /> },
+  { id: "missing", label: "Missing Info", icon: <HelpCircle className="w-3.5 h-3.5" /> },
+  { id: "actions", label: "Actions", icon: <ListChecks className="w-3.5 h-3.5" /> },
+];
+
+function Tabs({
+  activeTab,
+  setActiveTab,
+  codeCount,
+  kbCount,
+  missingCount,
+  actionCount,
+}: {
+  activeTab: TabId;
+  setActiveTab: (t: TabId) => void;
+  codeCount: number;
+  kbCount: number;
+  missingCount: number;
+  actionCount: number;
+}) {
+  const counts: Record<TabId, number | null> = {
+    overview: null,
+    code: codeCount,
+    kb: kbCount,
+    missing: missingCount,
+    actions: actionCount,
+  };
+
+  return (
+    <div className="flex items-center gap-1 border-b border-slate-800/70 overflow-x-auto">
+      {TAB_META.map((tab) => {
+        const active = tab.id === activeTab;
+        const count = counts[tab.id];
+        return (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-1.5 px-3.5 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors -mb-px ${
+              active
+                ? "border-violet-500 text-violet-300 font-semibold"
+                : "border-transparent text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+            {count != null && count > 0 && (
+              <span className="ml-0.5 text-[0.65rem] font-mono px-1.5 py-0.5 rounded-full bg-slate-800/80 text-slate-400">
+                {count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TabContent({
+  activeTab,
+  report,
+  codeFindings,
+  kbFindings,
+  retrievalTrail,
+  itemId,
+}: {
+  activeTab: TabId;
+  report: ResearchReport;
+  codeFindings: ResearchFinding[];
+  kbFindings: ResearchFinding[];
+  retrievalTrail: RetrievalStep[];
+  itemId: string;
+}) {
+  if (activeTab === "overview") {
     return (
-      <div className="flex justify-end">
-        <div className="bg-violet-900/30 border border-violet-700/25 rounded-2xl rounded-tr-sm px-4 py-2.5 max-w-[80%]">
-          <p className="text-sm text-violet-100 whitespace-pre-wrap">{message.content}</p>
+      <div className="space-y-5">
+        <Section number={1} title="Summary of the Issue" icon={<FileText className="w-4 h-4 text-violet-400" />}>
+          {report.summaryOfIssue ? (
+            <MarkdownBody content={report.summaryOfIssue} />
+          ) : (
+            <EmptyLine text="No summary available." />
+          )}
+        </Section>
+
+        <Section number={2} title="What We Found" icon={<CheckCircle2 className="w-4 h-4 text-emerald-400" />}>
+          <BulletList items={report.whatWeFound} emptyText="No concrete findings yet." />
+        </Section>
+
+        <Section number={3} title="What Is Missing" icon={<AlertTriangle className="w-4 h-4 text-amber-400" />}>
+          <BulletList items={report.whatIsMissing} emptyText="Nothing flagged as missing." />
+        </Section>
+
+        <Section number={4} title="Recommended Next Searches" icon={<Search className="w-4 h-4 text-cyan-400" />}>
+          <SearchChips terms={report.recommendedSearches} />
+        </Section>
+
+        <Section number={5} title="Action Items" icon={<ListChecks className="w-4 h-4 text-violet-400" />}>
+          <ActionItemsTable items={report.actionItems} itemId={itemId} />
+        </Section>
+      </div>
+    );
+  }
+
+  if (activeTab === "code") {
+    return <FindingsList findings={codeFindings} emptyText="No code evidence found for this item." trail={retrievalTrail} />;
+  }
+
+  if (activeTab === "kb") {
+    return <FindingsList findings={kbFindings} emptyText="No Knowledge Base articles matched this item." />;
+  }
+
+  if (activeTab === "missing") {
+    return (
+      <Section title="What Is Missing" icon={<HelpCircle className="w-4 h-4 text-amber-400" />}>
+        <BulletList items={report.whatIsMissing} emptyText="Nothing flagged as missing." />
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Action Items" icon={<ListChecks className="w-4 h-4 text-violet-400" />}>
+      <ActionItemsTable items={report.actionItems} itemId={itemId} />
+    </Section>
+  );
+}
+
+// ── Building blocks ───────────────────────────────────────────────────────────
+
+function Section({
+  number,
+  title,
+  icon,
+  children,
+}: {
+  number?: number;
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-800/70 bg-slate-900/30 p-4">
+      <div className="flex items-center gap-2 mb-3">
+        {number != null && (
+          <span className="w-5 h-5 rounded-md bg-violet-900/60 border border-violet-700/40 text-[0.65rem] font-bold text-violet-300 flex items-center justify-center">
+            {number}
+          </span>
+        )}
+        {icon}
+        <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function BulletList({ items, emptyText }: { items: string[]; emptyText: string }) {
+  if (!items || items.length === 0) return <EmptyLine text={emptyText} />;
+  return (
+    <ul className="space-y-1.5">
+      {items.map((entry, i) => (
+        <li key={i} className="flex items-start gap-2 text-sm text-slate-300 leading-relaxed">
+          <span className="mt-2 w-1 h-1 rounded-full bg-violet-500 shrink-0" />
+          <span className="min-w-0">
+            <MarkdownInline content={entry} />
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SearchChips({ terms }: { terms: string[] }) {
+  if (!terms || terms.length === 0) return <EmptyLine text="No suggested searches." />;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {terms.map((term, i) => (
+        <span
+          key={i}
+          className="font-mono text-xs px-2.5 py-1 rounded-md bg-slate-800/70 border border-slate-700/50 text-cyan-300"
+        >
+          {term}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ActionItemsTable({ items, itemId }: { items: ResearchReport["actionItems"]; itemId: string }) {
+  const storageKey = `research-actions:${itemId}`;
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setChecked(readLocal<Record<string, boolean>>(storageKey) ?? {});
+  }, [storageKey]);
+
+  if (!items || items.length === 0) return <EmptyLine text="No action items suggested." />;
+
+  const toggle = (task: string) => {
+    setChecked((prev) => {
+      const next = { ...prev, [task]: !prev[task] };
+      writeLocal(storageKey, next);
+      return next;
+    });
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[0.65rem] uppercase tracking-wide text-slate-500 border-b border-slate-800/70">
+            <th className="font-medium pb-2 pl-1 w-8"></th>
+            <th className="font-medium pb-2">Task</th>
+            <th className="font-medium pb-2 w-36">Owner</th>
+            <th className="font-medium pb-2 w-28">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((action, i) => {
+            const isDone = !!checked[action.task];
+            return (
+              <tr key={i} className="border-b border-slate-800/40 last:border-0">
+                <td className="py-2.5 pl-1 align-top">
+                  <input
+                    type="checkbox"
+                    checked={isDone}
+                    onChange={() => toggle(action.task)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 accent-violet-500 cursor-pointer"
+                  />
+                </td>
+                <td className={`py-2.5 pr-3 text-slate-300 ${isDone ? "line-through text-slate-500" : ""}`}>
+                  {action.task}
+                </td>
+                <td className="py-2.5 pr-3 align-top">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+                    <User className="w-3 h-3 text-violet-400" />
+                    {action.owner}
+                  </span>
+                </td>
+                <td className="py-2.5 align-top">
+                  <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+                    <span className={`w-1.5 h-1.5 rounded-full ${isDone ? "bg-emerald-400" : "bg-slate-500"}`} />
+                    {isDone ? "Done" : action.status}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FindingsList({
+  findings,
+  emptyText,
+  trail,
+}: {
+  findings: ResearchFinding[];
+  emptyText: string;
+  trail?: RetrievalStep[];
+}) {
+  if (!findings || findings.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-slate-800/70 bg-slate-900/30 p-8 text-center">
+          <p className="text-sm text-slate-500">{emptyText}</p>
         </div>
+        {trail && trail.length > 0 && <RetrievalTrail steps={trail} />}
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex justify-start">
-        <div className="bg-slate-800/60 border border-slate-700/40 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[92%] min-w-0">
-          <MarkdownBody content={message.content} />
+    <div className="space-y-3">
+      {findings.map((finding, i) => (
+        <div key={i} className="rounded-2xl border border-slate-800/70 bg-slate-900/30 p-4">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-sm font-semibold text-slate-200 truncate">{finding.label}</p>
+            <div className="flex items-center gap-2 shrink-0">
+              {finding.language && (
+                <span className="text-[0.65rem] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-400">
+                  {finding.language}
+                </span>
+              )}
+              {finding.webUrl && (
+                <a
+                  href={finding.webUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-400 hover:text-violet-300 transition-colors"
+                  title="Open source"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+            </div>
+          </div>
+          {finding.location && finding.location !== finding.label && (
+            <p className="text-xs font-mono text-slate-500 mb-2 truncate">{finding.location}</p>
+          )}
+          {finding.snippets && (
+            <pre className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 overflow-x-auto text-xs text-emerald-300 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-72">
+              {finding.snippets}
+            </pre>
+          )}
         </div>
-      </div>
-      {message.retrievalTrail && message.retrievalTrail.length > 0 && (
-        <RetrievalTrail steps={message.retrievalTrail} />
-      )}
+      ))}
+      {trail && trail.length > 0 && <RetrievalTrail steps={trail} />}
     </div>
   );
 }
 
-function MarkdownBody({ content }: { content: string }) {
+function EmptyLine({ text }: { text: string }) {
+  return <p className="text-sm text-slate-500 italic">{text}</p>;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function statusToneColor(label: string): { text: string; dot: string } {
+  const v = label.toLowerCase();
+  if (v.includes("block") || v.includes("overdue") || v.includes("urgent")) {
+    return { text: "text-red-400", dot: "bg-red-500" };
+  }
+  if (v.includes("closed") || v.includes("done") || v.includes("complete") || v.includes("ready")) {
+    return { text: "text-emerald-400", dot: "bg-emerald-500" };
+  }
+  if (v.includes("progress") || v.includes("review") || v.includes("waiting") || v.includes("pending")) {
+    return { text: "text-amber-400", dot: "bg-amber-500" };
+  }
+  return { text: "text-cyan-400", dot: "bg-cyan-500" };
+}
+
+function confidenceColor(level: string): { text: string } {
+  if (level === "High") return { text: "text-emerald-400" };
+  if (level === "Medium") return { text: "text-amber-400" };
+  return { text: "text-red-400" };
+}
+
+// ── Markdown rendering (reused from the chat-era modal) ─────────────────────────
+
+function MarkdownInline({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        h1: ({ children }) => (
-          <h1 className="text-base font-bold text-slate-100 mt-3 mb-1.5 first:mt-0">{children}</h1>
-        ),
-        h2: ({ children }) => (
-          <h2 className="text-sm font-bold text-slate-100 mt-3 mb-1 first:mt-0">{children}</h2>
-        ),
-        h3: ({ children }) => (
-          <h3 className="text-sm font-semibold text-slate-200 mt-2.5 mb-1 first:mt-0">{children}</h3>
-        ),
-        h4: ({ children }) => (
-          <h4 className="text-xs font-semibold text-slate-300 mt-2 mb-0.5 first:mt-0">{children}</h4>
-        ),
-        p: ({ children }) => (
-          <p className="text-sm text-slate-200 leading-relaxed mb-2 last:mb-0">{children}</p>
-        ),
-        ul: ({ children }) => (
-          <ul className="list-disc list-outside pl-4 mb-2 space-y-0.5 text-sm text-slate-200">{children}</ul>
-        ),
-        ol: ({ children }) => (
-          <ol className="list-decimal list-outside pl-4 mb-2 space-y-0.5 text-sm text-slate-200">{children}</ol>
-        ),
-        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-        strong: ({ children }) => (
-          <strong className="font-semibold text-slate-100">{children}</strong>
-        ),
+        p: ({ children }) => <span className="text-sm text-slate-300 leading-relaxed">{children}</span>,
+        strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
         em: ({ children }) => <em className="italic text-slate-300">{children}</em>,
-        hr: () => <hr className="border-slate-700/50 my-3" />,
-        blockquote: ({ children }) => (
-          <blockquote className="border-l-2 border-violet-600/50 pl-3 my-2 text-slate-400 italic text-sm">
-            {children}
-          </blockquote>
-        ),
         a: ({ href, children }) => (
           <a
             href={href}
@@ -317,7 +745,44 @@ function MarkdownBody({ content }: { content: string }) {
             {children}
           </a>
         ),
-        code: ({ className, children, ...props }) => {
+        code: ({ children }) => (
+          <code className="text-xs font-mono text-emerald-300 bg-slate-900/60 rounded px-1 py-0.5">{children}</code>
+        ),
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
+function MarkdownBody({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => (
+          <p className="text-sm text-slate-300 leading-relaxed mb-2 last:mb-0">{children}</p>
+        ),
+        ul: ({ children }) => (
+          <ul className="list-disc list-outside pl-4 mb-2 space-y-0.5 text-sm text-slate-300">{children}</ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="list-decimal list-outside pl-4 mb-2 space-y-0.5 text-sm text-slate-300">{children}</ol>
+        ),
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
+        em: ({ children }) => <em className="italic text-slate-300">{children}</em>,
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-violet-400 hover:text-violet-300 underline underline-offset-2 break-all"
+          >
+            {children}
+          </a>
+        ),
+        code: ({ className, children }) => {
           const isBlock = className?.startsWith("language-");
           if (isBlock) {
             return (
@@ -327,28 +792,13 @@ function MarkdownBody({ content }: { content: string }) {
             );
           }
           return (
-            <code className="text-xs font-mono text-emerald-300 bg-slate-900/60 rounded px-1 py-0.5">
-              {children}
-            </code>
+            <code className="text-xs font-mono text-emerald-300 bg-slate-900/60 rounded px-1 py-0.5">{children}</code>
           );
         },
         pre: ({ children }) => (
-          <pre className="bg-slate-900/70 border border-slate-700/40 rounded-lg p-3 my-2 overflow-x-auto text-xs">
+          <pre className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 my-2 overflow-x-auto text-xs">
             {children}
           </pre>
-        ),
-        table: ({ children }) => (
-          <div className="overflow-x-auto my-2">
-            <table className="text-xs text-slate-300 border-collapse w-full">{children}</table>
-          </div>
-        ),
-        th: ({ children }) => (
-          <th className="text-left text-slate-200 font-semibold border border-slate-700/40 px-2 py-1 bg-slate-800/50">
-            {children}
-          </th>
-        ),
-        td: ({ children }) => (
-          <td className="border border-slate-700/40 px-2 py-1">{children}</td>
         ),
       }}
     >
@@ -362,19 +812,17 @@ function RetrievalTrail({ steps }: { steps: RetrievalStep[] }) {
   const codeSteps = steps.filter((s) => s.tool !== "intent");
 
   return (
-    <div className="ml-1">
+    <div className="rounded-xl border border-slate-800/60 bg-slate-900/20 px-3 py-2">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-[0.68rem] text-slate-500 hover:text-slate-400 transition-colors"
+        className="flex items-center gap-1.5 text-[0.7rem] text-slate-500 hover:text-slate-400 transition-colors"
       >
-        <ChevronDown
-          className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`}
-        />
+        <ChevronDown className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} />
         {codeSteps.length} retrieval step{codeSteps.length !== 1 ? "s" : ""}
       </button>
       {open && (
-        <div className="mt-1.5 space-y-1 pl-1 border-l border-slate-700/40">
+        <div className="mt-2 space-y-1 pl-1 border-l border-slate-800/60">
           {steps.map((step, i) => (
             <div key={i} className="flex items-start gap-2">
               <span className="mt-0.5 shrink-0 text-[0.6rem] font-mono font-bold uppercase text-slate-600 w-20">

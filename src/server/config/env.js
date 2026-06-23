@@ -75,7 +75,15 @@ export function buildConfig(overrides = {}) {
     teamGptAppId: process.env.TEAMGPT_APP_ID || "9225",
     teamGptEnvironment: process.env.TEAMGPT_ENVIRONMENT || "prod",
     teamGptModel:
-      process.env.TEAMGPT_MODEL || "anthropic.claude-haiku-4-5-20251001-v1:0",
+      process.env.TEAMGPT_MODEL || "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    teamGptLargeContextModel: normalizeOnOffOption(
+      process.env.TEAMGPT_LARGE_CONTEXT_MODEL,
+      "on"
+    ),
+    teamGptExtendedThinking: normalizeOnOffOption(
+      process.env.TEAMGPT_EXTENDED_THINKING,
+      "on"
+    ),
     teamGptParserModel:
       process.env.TEAMGPT_PARSER_MODEL ||
       "anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -86,6 +94,16 @@ export function buildConfig(overrides = {}) {
     // Sourcebot
     sourcebotHost:   process.env.SOURCEBOT_HOST    || "",
     sourcebotApiKey: process.env.SOURCEBOT_API_KEY || "",
+
+    // Knowledge Base
+    kbEndpoint:
+      process.env.KB_ENDPOINT ||
+      "https://tools.benchmarkdigital.com/kb/callKBX.cfm",
+    kbAuthToken: process.env.KB_AUTH_TOKEN || "",
+    kbRequestTimeoutMs: Number.parseInt(
+      process.env.KB_REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "20000",
+      10
+    ),
 
     // Microsoft Graph / Azure AD
     graphTenantId:      process.env.GRAPH_TENANT_ID      || "",
@@ -105,4 +123,9 @@ function normalizeAiProvider(value, fallback) {
   return normalized === "openai" || normalized === "teamgpt"
     ? normalized
     : fallback;
+}
+
+function normalizeOnOffOption(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "on" || normalized === "off" ? normalized : fallback;
 }

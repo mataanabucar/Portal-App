@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import { collectKbResearch } from "../kb/research.js";
+import { createTeamGptClient } from "../teamgpt/client.js";
 import {
   RESEARCH_REPO_PREFIXES,
   resolveApplicationContext,
@@ -9,10 +11,13 @@ const MAX_CANDIDATES = 3;
 
 export async function runResearchPipeline({
   sourcebotService,
+  kbService,
   config,
   itemContext,
   userQuery,
   messages = [],
+  teamGptAuthService,
+  kbAuthToken = "",
 }) {
   const trail = [];
   const applicationMatch = resolveApplicationContext({
@@ -21,15 +26,8 @@ export async function runResearchPipeline({
     messages,
   });
 
-  let openai = null;
-  try {
-    if (config.openAiEnabled && config.openAiApiKey) {
-      openai = new OpenAI({ apiKey: config.openAiApiKey });
-    }
-  } catch (error) {
-    console.error("[research-pipeline] OpenAI init failed:", error.message);
-  }
-
+  const openai = createOpenAiClient(config);
+  const teamGptClient = createTeamGptClient(config, teamGptAuthService);
   const model = config.openAiModel || "gpt-4o-mini";
 
   const intent = openai
@@ -50,14 +48,124 @@ export async function runResearchPipeline({
         : ""),
   });
 
+  const [sourcebotResearch, kbResearch] = await Promise.all([
+    collectSourcebotResearch({
+      sourcebotService,
+      intent: normalizedIntent,
+      applicationMatch,
+    }),
+    collectKbResearch({
+      kbService,
+      itemContext,
+      primarySearchTerm: normalizedIntent.primarySearchTerm,
+      fallbackTerms: normalizedIntent.fallbackTerms,
+      kbAuthToken,
+    }),
+  ]);
+
+  trail.push(...sourcebotResearch.trail, ...kbResearch.trail);
+
+  const evidenceBlocks = [
+    ...sourcebotResearch.evidenceBlocks,
+    ...kbResearch.evidenceBlocks,
+  ];
+
+  // Surface the evidence directly so the UI can render distinct Code vs KB tabs.
+  const codeFindings = sourcebotResearch.evidenceBlocks.map(toFinding);
+  const kbFindings = kbResearch.evidenceBlocks.map(toFinding);
+  const recommendedSearches = mergeTerms(
+    [normalizedIntent.primarySearchTerm],
+    normalizedIntent.fallbackTerms
+  );
+
+  let report;
+  if (evidenceBlocks.length === 0) {
+    report = buildNoEvidenceReport(normalizedIntent, recommendedSearches);
+  } else if (teamGptClient) {
+    try {
+      report = await synthesizeReportWithTeamGpt(teamGptClient, config, {
+        itemContext,
+        userQuery,
+        messages,
+        evidenceBlocks,
+      });
+      trail.push({
+        tool: "synthesize",
+        summary: `Synthesized ${evidenceBlocks.length} evidence block(s) into a structured report with TeamGPT.`,
+      });
+    } catch (error) {
+      console.error("[research-pipeline] TeamGPT synthesis failed:", error.message);
+      report = openai
+        ? await synthesizeReportWithOpenAi(openai, model, {
+            itemContext,
+            userQuery,
+            messages,
+            evidenceBlocks,
+          }).catch(() => buildFallbackReport(evidenceBlocks, normalizedIntent))
+        : buildFallbackReport(evidenceBlocks, normalizedIntent);
+    }
+  } else if (openai) {
+    try {
+      report = await synthesizeReportWithOpenAi(openai, model, {
+        itemContext,
+        userQuery,
+        messages,
+        evidenceBlocks,
+      });
+      trail.push({
+        tool: "synthesize",
+        summary: `Synthesized ${evidenceBlocks.length} evidence block(s) into a structured report with OpenAI.`,
+      });
+    } catch (error) {
+      console.error("[research-pipeline] OpenAI synthesis failed:", error.message);
+      report = buildFallbackReport(evidenceBlocks, normalizedIntent);
+    }
+  } else {
+    report = buildFallbackReport(evidenceBlocks, normalizedIntent);
+  }
+
+  // recommendedSearches is deterministic (from intent), not LLM-authored.
+  report.recommendedSearches = recommendedSearches;
+
+  return {
+    report,
+    codeFindings,
+    kbFindings,
+    retrievalTrail: trail,
+    chatUrl: sourcebotResearch.chatUrl || null,
+  };
+}
+
+function toFinding(block) {
+  return {
+    label: block.label,
+    location: block.location,
+    webUrl: block.webUrl || null,
+    language: block.language || null,
+    snippets: block.snippets || "",
+  };
+}
+
+async function collectSourcebotResearch({ sourcebotService, intent, applicationMatch }) {
+  const trail = [];
+  const evidenceBlocks = [];
+
+  if (!sourcebotService?.enabled) {
+    trail.push({
+      tool: "search_code",
+      summary: "Sourcebot search skipped because Sourcebot is not configured in this local server.",
+    });
+    return { trail, evidenceBlocks, chatUrl: null };
+  }
+
   let relevantRepos = [];
   try {
     relevantRepos = mergeRepos(
       applicationMatch?.repoSearchOrder.map((name) => ({ name })) ?? []
     );
 
-    const repos = normalizedIntent.repoHint
-      ? await sourcebotService.listRepos({ query: normalizedIntent.repoHint, perPage: 20 })
+    const repos = intent.repoHint
+      ? await sourcebotService.listRepos({ query: intent.repoHint, perPage: 20 })
       : [];
     const discoveredRepos = repos
       .filter((repo) => isSupportedRepo(repo.name))
@@ -70,19 +178,22 @@ export async function runResearchPipeline({
     trail.push({
       tool: "list_repos",
       summary:
-        normalizedIntent.repoHint
-          ? `Repo search "${normalizedIntent.repoHint}" -> ${repos.length} repos total, ${discoveredRepos.length} supported repos, ${relevantRepos.length} selected`
+        intent.repoHint
+          ? `Repo search "${intent.repoHint}" -> ${repos.length} repos total, ${discoveredRepos.length} supported repos, ${relevantRepos.length} selected`
           : `Using catalog repos only -> ${relevantRepos.length} selected`,
     });
   } catch (error) {
-    trail.push({ tool: "list_repos", summary: `Repo discovery failed: ${error.message}` });
+    trail.push({
+      tool: "list_repos",
+      summary: `Repo discovery failed: ${error.message}`,
+    });
   }
 
   let broadFiles = [];
   try {
     const scopedRepos = relevantRepos.map((repo) => repo.name);
     const broad = await sourcebotService.searchCode({
-      query: normalizedIntent.primarySearchTerm,
+      query: intent.primarySearchTerm,
       filterByRepos: scopedRepos,
       includeCodeSnippets: false,
       maxTokens: 10000,
@@ -91,27 +202,30 @@ export async function runResearchPipeline({
     trail.push({
       tool: "search_code",
       summary:
-        `Broad search "${normalizedIntent.primarySearchTerm}"` +
+        `Broad search "${intent.primarySearchTerm}"` +
         (scopedRepos.length ? ` in ${scopedRepos.join(", ")}` : "") +
         ` -> ${broad.totalFiles} matches, ${broadFiles.length} shown`,
     });
 
     if (broadFiles.length === 0 && scopedRepos.length > 0) {
-      const unscoped = await sourcebotService.searchCode({
-        query: normalizedIntent.primarySearchTerm,
+      const fallbackBroad = await sourcebotService.searchCode({
+        query: intent.primarySearchTerm,
         includeCodeSnippets: false,
         maxTokens: 10000,
       });
-      broadFiles = unscoped.files;
+      broadFiles = fallbackBroad.files;
       trail.push({
         tool: "search_code",
         summary:
-          `Broad fallback "${normalizedIntent.primarySearchTerm}" without repo filter` +
-          ` -> ${unscoped.totalFiles} matches, ${broadFiles.length} shown`,
+          `Broad fallback "${intent.primarySearchTerm}" without repo filter` +
+          ` -> ${fallbackBroad.totalFiles} matches, ${broadFiles.length} shown`,
       });
     }
   } catch (error) {
-    trail.push({ tool: "search_code", summary: `Broad search failed: ${error.message}` });
+    trail.push({
+      tool: "search_code",
+      summary: `Broad search failed: ${error.message}`,
+    });
   }
 
   const candidates = rankCandidates(
@@ -120,33 +234,37 @@ export async function runResearchPipeline({
     applicationMatch?.pathPrefixes ?? []
   );
 
-  const evidenceBlocks = [];
-
   for (const candidate of candidates.slice(0, MAX_CANDIDATES)) {
     try {
       const focused = await sourcebotService.searchCode({
-        query: normalizedIntent.primarySearchTerm,
+        query: intent.primarySearchTerm,
         filterByRepos: [candidate.repository],
         filterByFilepaths: [candidate.fileName],
         includeCodeSnippets: true,
         maxTokens: 12000,
       });
-      if (focused.files.length > 0) {
-        const file = focused.files[0];
-        if (file.chunks.length > 0) {
-          evidenceBlocks.push({
-            repo: candidate.repository,
-            path: candidate.fileName,
-            webUrl: candidate.webUrl,
-            language: candidate.language,
-            snippets: file.chunks.join("\n---\n"),
-          });
-          trail.push({
-            tool: "search_code",
-            summary: `Focused: ${candidate.repository}/${candidate.fileName} -> ${file.chunks.length} snippet(s)`,
-          });
-        }
+
+      if (focused.files.length === 0) {
+        continue;
       }
+
+      const file = focused.files[0];
+      if (file.chunks.length === 0) {
+        continue;
+      }
+
+      evidenceBlocks.push({
+        source: "sourcebot",
+        label: `${candidate.repository}/${candidate.fileName}`,
+        location: `${candidate.repository}/${candidate.fileName}`,
+        webUrl: candidate.webUrl,
+        language: candidate.language,
+        snippets: file.chunks.join("\n---\n"),
+      });
+      trail.push({
+        tool: "search_code",
+        summary: `Focused: ${candidate.repository}/${candidate.fileName} -> ${file.chunks.length} snippet(s)`,
+      });
     } catch {
       // Continue with remaining candidates.
     }
@@ -154,10 +272,9 @@ export async function runResearchPipeline({
     if (evidenceBlocks.length >= MAX_EVIDENCE_BLOCKS) break;
   }
 
-  if (evidenceBlocks.length === 0 && normalizedIntent.fallbackTerms.length > 0) {
+  if (evidenceBlocks.length === 0 && intent.fallbackTerms.length > 0) {
     const scopedRepos = relevantRepos.map((repo) => repo.name);
-
-    for (const term of normalizedIntent.fallbackTerms.slice(0, 4)) {
+    for (const term of intent.fallbackTerms.slice(0, 4)) {
       try {
         const fallback = await sourcebotService.searchCode({
           query: term,
@@ -165,22 +282,27 @@ export async function runResearchPipeline({
           includeCodeSnippets: true,
           maxTokens: 8000,
         });
-        if (fallback.files.length > 0) {
-          const file = fallback.files[0];
-          if (file.chunks.length > 0) {
-            evidenceBlocks.push({
-              repo: file.repository,
-              path: file.fileName,
-              webUrl: file.webUrl,
-              language: file.language,
-              snippets: file.chunks.join("\n---\n"),
-            });
-            trail.push({
-              tool: "search_code",
-              summary: `Fallback "${term}" -> ${fallback.files.length} file(s)`,
-            });
-          }
+        if (fallback.files.length === 0) {
+          continue;
         }
+
+        const file = fallback.files[0];
+        if (file.chunks.length === 0) {
+          continue;
+        }
+
+        evidenceBlocks.push({
+          source: "sourcebot",
+          label: `${file.repository}/${file.fileName}`,
+          location: `${file.repository}/${file.fileName}`,
+          webUrl: file.webUrl,
+          language: file.language,
+          snippets: file.chunks.join("\n---\n"),
+        });
+        trail.push({
+          tool: "search_code",
+          summary: `Fallback "${term}" -> ${fallback.files.length} file(s)`,
+        });
         if (evidenceBlocks.length >= 2) break;
       } catch {
         // Continue with remaining fallback terms.
@@ -188,29 +310,11 @@ export async function runResearchPipeline({
     }
   }
 
-  let answer;
-  if (evidenceBlocks.length === 0) {
-    answer =
-      `No matching code was found for "${normalizedIntent.primarySearchTerm}" in the Benchmark Digital codebase.\n\n` +
-      `Search terms tried: ${[normalizedIntent.primarySearchTerm, ...normalizedIntent.fallbackTerms].join(", ")}.\n\n` +
-      "Try narrowing the question to a specific feature name, form field, file name, or ColdFusion template.";
-  } else if (openai) {
-    try {
-      answer = await synthesizeAnswer(openai, model, {
-        itemContext,
-        userQuery,
-        messages,
-        evidenceBlocks,
-      });
-    } catch (error) {
-      console.error("[research-pipeline] synthesizeAnswer failed:", error.message);
-      answer = buildPlainAnswer(evidenceBlocks, normalizedIntent.primarySearchTerm);
-    }
-  } else {
-    answer = buildPlainAnswer(evidenceBlocks, normalizedIntent.primarySearchTerm);
-  }
-
-  return { answer, retrievalTrail: trail, chatUrl: null };
+  return {
+    trail,
+    evidenceBlocks,
+    chatUrl: null,
+  };
 }
 
 async function extractIntent(openai, model, itemContext, userQuery) {
@@ -281,61 +385,241 @@ function rankCandidates(files, relevantRepos, pathPrefixes = []) {
     .sort((a, b) => b.score - a.score);
 }
 
-async function synthesizeAnswer(openai, model, { itemContext, userQuery, messages, evidenceBlocks }) {
-  const instructions = [
-    "You are a technical assistant helping resolve Benchmark Digital portal support items.",
-    "The Benchmark Digital product is a ColdFusion-based EHS software platform.",
-    "Answer the user's question based only on the code evidence retrieved from the Benchmark Digital codebase.",
-    "Include specific file paths and repo references for every claim.",
-    "If evidence is insufficient, say so clearly and suggest what else to search for.",
-    "Do not guess or make up information not present in the evidence.",
-    "Format your response clearly with short paragraphs, bullets, and code blocks where helpful.",
-  ].join(" ");
+async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext, userQuery, messages, evidenceBlocks }) {
+  const response = await teamGptClient.completeText({
+    instructions: buildSynthesisInstructions(),
+    prompt: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks }),
+    model: config.teamGptModel,
+    wordLimit: 1200,
+    tone: "Professional + Straightforward",
+    format: "plain_text",
+    temperature: 0.2,
+  });
 
-  const evidenceText = evidenceBlocks
-    .map(
-      (block, index) =>
-        `### Evidence ${index + 1}: ${block.repo}/${block.path}\nURL: ${block.webUrl}\nLanguage: ${block.language}\n\n${block.snippets}`
-    )
-    .join("\n\n---\n\n");
+  const parsed = parseReportJson(response.text);
+  if (!parsed) {
+    throw new Error("TeamGPT did not return parseable report JSON.");
+  }
+  return normalizeReport(parsed);
+}
 
-  const historyText = messages.length > 0
-    ? "\n\nPrevious conversation:\n" +
-      messages.map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`).join("\n\n")
-    : "";
-
-  const input = [
-    `Portal item context:\n${itemContext}`,
-    historyText,
-    `\nCode evidence from codebase:\n${evidenceText}`,
-    `\nUser question:\n${userQuery}`,
-  ].join("\n");
-
+async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuery, messages, evidenceBlocks }) {
   const response = await openai.responses.create({
     model,
     store: false,
-    instructions,
-    input,
+    instructions: buildSynthesisInstructions(),
+    input: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks }),
   });
 
-  return response.output_text ?? "Unable to synthesize an answer from the retrieved evidence.";
+  const parsed = parseReportJson(response.output_text);
+  if (!parsed) {
+    throw new Error("OpenAI did not return parseable report JSON.");
+  }
+  return normalizeReport(parsed);
 }
 
-function buildPlainAnswer(evidenceBlocks, searchTerm) {
-  const lines = [`Found ${evidenceBlocks.length} relevant file(s) for "${searchTerm}":\n`];
+function buildSynthesisInstructions() {
+  return [
+    "You are a technical assistant helping resolve Benchmark Digital portal support items.",
+    "You will receive code evidence from Sourcebot and documentation evidence from the internal Knowledge Base.",
+    "",
+    "DOMAIN PRIMER — the target system is the ATS Audit (Action Tracking System), a ColdFusion (CFML) app:",
+    "- Pages are server-rendered .cfm templates; AJAX goes through audit/remoteproxy.cfm (a JSON-RPC gateway) and form saves go through audit/audaction.cfm.",
+    "- Business logic lives in CFCs under cfc/apps/ats/ (audit.cfc is the ~11k-line core).",
+    "- Feature flags, field visibility and labels come from setup variables: api.go.getSetupVar(var, busid, siteid, appid, default).",
+    "- Custom/additional fields are stored in the extensions_data EAV table (Record_Name/Record_Value keyed by Record_Group_ID); standard data is in tblAudit.",
+    "- Findings carry RefType/RefID reference links (e.g. ats5Why), ResponPerson (Responsible Person), Status, ClosureDueDate.",
+    "- Edit/permission gating uses request.permissions.accessRights / accessLevel (e.g. Level 3 users).",
+    "Frame findings, gaps and next steps in these real ATS terms when the evidence supports it. Never invent setup vars, columns, or files not present in the evidence.",
+    "",
+    "Answer ONLY from the supplied evidence. Do not invent implementation details or KB content.",
+    "Return your answer as STRICT JSON only — no markdown, no code fences, no prose outside the JSON object.",
+    "Use exactly this shape:",
+    "{",
+    '  "quickTake": { "issue": "one sentence stating the problem", "whatWeKnow": "one sentence on what the evidence confirms", "nextStep": "one sentence on the recommended next action" },',
+    '  "summaryOfIssue": "2-4 sentence plain-text summary of the issue and context",',
+    '  "whatWeFound": ["concise bullet of a concrete finding from the evidence", "..."],',
+    '  "whatIsMissing": ["concise bullet describing a specific gap or unknown", "..."],',
+    '  "confidence": { "level": "Low" | "Medium" | "High", "criticalGaps": <integer count of whatIsMissing items that block resolution>, "reason": "short justification" },',
+    '  "actionItems": [ { "task": "imperative action", "owner": "Engineer" | "Customer POC" | "Product", "status": "Not started" } ]',
+    "}",
+    "Cite code claims with repo/path references and KB claims with content titles or content IDs inside the relevant bullets when visible.",
+    "Keep every field concise and action-oriented. Provide 2-5 items for whatWeFound, whatIsMissing, and actionItems.",
+  ].join("\n");
+}
 
-  for (const block of evidenceBlocks) {
-    lines.push(`**${block.repo}/${block.path}** (${block.language})`);
-    lines.push(`URL: ${block.webUrl}`);
-    if (block.snippets) {
-      lines.push("```");
-      lines.push(block.snippets.slice(0, 800));
-      lines.push("```");
-    }
-    lines.push("");
+// Extract a JSON object from a model reply that may be wrapped in code fences or prose.
+function parseReportJson(text) {
+  const raw = typeof text === "string" ? text.trim() : "";
+  if (!raw) return null;
+
+  const withoutFences = raw
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  const candidates = [withoutFences];
+  const firstBrace = withoutFences.indexOf("{");
+  const lastBrace = withoutFences.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(withoutFences.slice(firstBrace, lastBrace + 1));
   }
 
-  return lines.join("\n");
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+function normalizeReport(parsed) {
+  const quickTake = parsed.quickTake && typeof parsed.quickTake === "object" ? parsed.quickTake : {};
+  const confidence = parsed.confidence && typeof parsed.confidence === "object" ? parsed.confidence : {};
+  const level = ["Low", "Medium", "High"].includes(confidence.level) ? confidence.level : "Low";
+
+  const whatIsMissing = toStringArray(parsed.whatIsMissing);
+  const criticalGaps = Number.isInteger(confidence.criticalGaps)
+    ? confidence.criticalGaps
+    : whatIsMissing.length;
+
+  return {
+    quickTake: {
+      issue: normalizeString(quickTake.issue),
+      whatWeKnow: normalizeString(quickTake.whatWeKnow),
+      nextStep: normalizeString(quickTake.nextStep),
+    },
+    summaryOfIssue: normalizeString(parsed.summaryOfIssue),
+    whatWeFound: toStringArray(parsed.whatWeFound),
+    whatIsMissing,
+    recommendedSearches: [], // filled in deterministically by the caller
+    confidence: {
+      level,
+      criticalGaps,
+      reason: normalizeString(confidence.reason),
+    },
+    actionItems: toActionItems(parsed.actionItems),
+  };
+}
+
+function toStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => normalizeString(typeof entry === "string" ? entry : entry?.text ?? entry?.value))
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function toActionItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const task = normalizeString(entry.task);
+      if (!task) return null;
+      return {
+        task,
+        owner: normalizeString(entry.owner) || "Engineer",
+        status: normalizeString(entry.status) || "Not started",
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function normalizeString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks }) {
+  const historyText =
+    messages.length > 0
+      ? "\n\nPrevious conversation:\n" +
+        messages.map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`).join("\n\n")
+      : "";
+
+  const evidenceText = evidenceBlocks
+    .map((block, index) => {
+      return [
+        `### Evidence ${index + 1}: ${block.source.toUpperCase()}`,
+        `Label: ${block.label}`,
+        `Location: ${block.location}`,
+        block.webUrl ? `URL: ${block.webUrl}` : "",
+        block.language ? `Language: ${block.language}` : "",
+        "",
+        block.snippets,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n---\n\n");
+
+  return [
+    `Portal item context:\n${itemContext}`,
+    historyText,
+    `\nEvidence:\n${evidenceText}`,
+    `\nUser question:\n${userQuery}`,
+  ].join("\n");
+}
+
+// Deterministic structured report when no LLM is available or JSON parsing fails.
+function buildFallbackReport(evidenceBlocks, intent) {
+  const codeCount = evidenceBlocks.filter((block) => block.source === "sourcebot").length;
+  const kbCount = evidenceBlocks.filter((block) => block.source === "kb").length;
+  const searchTerm = intent.primarySearchTerm;
+
+  const whatWeFound = evidenceBlocks.map((block) => {
+    const sourceLabel = block.source === "kb" ? "Knowledge Base" : "Code";
+    const evidence = block.snippets ? ` — ${truncateForPlainText(block.snippets)}` : "";
+    return `${sourceLabel}: ${block.label}${evidence}`;
+  });
+
+  return {
+    quickTake: {
+      issue: `Investigating "${searchTerm}".`,
+      whatWeKnow: `${evidenceBlocks.length} evidence block(s) found (${codeCount} code, ${kbCount} KB).`,
+      nextStep: "Review the Code Findings and KB Findings tabs, then narrow the search if needed.",
+    },
+    summaryOfIssue: `Automated synthesis was unavailable, so this is the raw evidence collected for "${searchTerm}".`,
+    whatWeFound,
+    whatIsMissing: [
+      "An AI-synthesized assessment (the language model was unavailable or returned an unparseable response).",
+    ],
+    recommendedSearches: [],
+    confidence: {
+      level: "Low",
+      criticalGaps: 1,
+      reason: "Report assembled from raw evidence without AI synthesis.",
+    },
+    actionItems: [],
+  };
+}
+
+function buildNoEvidenceReport(intent, recommendedSearches) {
+  const termsTried = [intent.primarySearchTerm, ...intent.fallbackTerms].filter(Boolean).join(", ");
+  return {
+    quickTake: {
+      issue: `No matching code or Knowledge Base evidence was found for "${intent.primarySearchTerm}".`,
+      whatWeKnow: "Searches returned no usable evidence.",
+      nextStep: "Narrow the question to a specific feature, form field, file name, KB title, or ColdFusion template.",
+    },
+    summaryOfIssue: `No code or KB evidence matched the search terms (${termsTried || "none derived"}).`,
+    whatWeFound: [],
+    whatIsMissing: [
+      "Any code evidence from the target repositories.",
+      "Any Knowledge Base article matching the search terms.",
+    ],
+    recommendedSearches: recommendedSearches ?? [],
+    confidence: {
+      level: "Low",
+      criticalGaps: 2,
+      reason: "No evidence retrieved.",
+    },
+    actionItems: [],
+  };
 }
 
 function normalizeIntent(intent, { itemContext, userQuery, applicationMatch }) {
@@ -465,4 +749,20 @@ function extractContextLine(itemContext, label) {
 
 function isSupportedRepo(repoName) {
   return RESEARCH_REPO_PREFIXES.some((prefix) => repoName?.startsWith(prefix));
+}
+
+function createOpenAiClient(config) {
+  try {
+    if (config.openAiEnabled && config.openAiApiKey) {
+      return new OpenAI({ apiKey: config.openAiApiKey });
+    }
+  } catch (error) {
+    console.error("[research-pipeline] OpenAI init failed:", error.message);
+  }
+  return null;
+}
+
+function truncateForPlainText(value) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+  return normalized.length > 260 ? `${normalized.slice(0, 257)}...` : normalized;
 }

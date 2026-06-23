@@ -28,7 +28,13 @@ export function createSummarizer(config, { teamGptAuthService } = {}) {
       const provider = resolveProvider(options.provider || config.summaryProvider);
 
       if (provider === "teamgpt") {
-        return summarizeWithTeamGpt(config, teamGptClient, snapshot, focus);
+        return summarizeWithTeamGpt(
+          config,
+          teamGptClient,
+          snapshot,
+          focus,
+          options
+        );
       }
 
       if (!openAiClient) {
@@ -66,14 +72,22 @@ async function summarizeWithOpenAi(config, client, snapshot, focus) {
   };
 }
 
-async function summarizeWithTeamGpt(config, teamGptClient, snapshot, focus) {
+async function summarizeWithTeamGpt(
+  config,
+  teamGptClient,
+  snapshot,
+  focus,
+  options = {}
+) {
   const instructions = buildInstructions(focus);
+  const tone = normalizeTone(options.tone);
   const trace = buildSummaryTrace({
     provider: "teamgpt",
     model: config.teamGptModel,
     instructions,
     input: snapshot.summaryInput,
-    endpoint: config.teamGptEndpointUrl
+    endpoint: config.teamGptEndpointUrl,
+    tone
   });
 
   if (!teamGptClient) {
@@ -91,7 +105,7 @@ async function summarizeWithTeamGpt(config, teamGptClient, snapshot, focus) {
       prompt: snapshot.summaryInput,
       model: config.teamGptModel,
       wordLimit: 900,
-      tone: "Professional + Straightforward",
+      tone,
       format: "plain_text",
       temperature: 0.2
     });
@@ -129,6 +143,12 @@ function buildInstructions(focus) {
 
 function normalizeFocus(focus) {
   return typeof focus === "string" && focus.trim() ? focus.trim() : null;
+}
+
+function normalizeTone(tone) {
+  return typeof tone === "string" && tone.trim()
+    ? tone.trim()
+    : "Professional + Straightforward";
 }
 
 function resolveProvider(value) {
@@ -169,11 +189,19 @@ function buildTeamGptFailureSummary(config, focus, reason, trace = null) {
   };
 }
 
-function buildSummaryTrace({ provider, model, instructions, input, endpoint = "" }) {
+function buildSummaryTrace({
+  provider,
+  model,
+  instructions,
+  input,
+  endpoint = "",
+  tone = ""
+}) {
   return {
     provider,
     model,
     endpoint: endpoint || null,
+    tone: tone || null,
     instructions,
     input,
     inputLength: typeof input === "string" ? input.length : 0

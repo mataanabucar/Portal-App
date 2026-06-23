@@ -1,16 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { RefreshCw, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SelectMenu } from "@/components/ui/select-menu";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AISummaryCard } from "@/components/ai-summary/AISummaryCard";
 import { QuickReadModal } from "@/components/quick-read/QuickReadModal";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
 import { orderByPriority } from "@/lib/priority";
+import { readLocal, subscribeLocal, writeLocal } from "@/lib/storage";
 import { useDashboard } from "@/hooks/useDashboard";
 
+const DEFAULT_SUMMARY_TONE = "Professional + Straightforward";
+const SUMMARY_TONE_STORAGE_KEY = "dashboard-summary-tone";
+const SUMMARY_TONE_OPTIONS = [
+  "Friendly + Professional",
+  "Authoritative + Informative",
+  "Urgent + Persuasive",
+  "Casual + Conversational",
+  "Professional + Trustworthy",
+  "Humorous + Informal",
+  "Professional + Straightforward",
+  "Serious + Empathetic",
+  "Positive + Enthusiastic",
+  "Authoritative + Professional",
+  "Casual + Funny",
+  "Authoritative + Experts",
+] as const;
+
+type SummaryTone = (typeof SUMMARY_TONE_OPTIONS)[number];
+
 export function DashboardPage() {
+  const summaryTone = useStoredSummaryTone();
+  const [quickReadOpen, setQuickReadOpen] = useState(false);
   const {
     items,
     error,
@@ -21,19 +44,32 @@ export function DashboardPage() {
     loadingProgress,
     loadingLabel,
     refresh,
+    refreshWithRequest,
   } = useDashboard({
     includeSummary: true,
+    summaryTone,
   });
-  const [quickReadOpen, setQuickReadOpen] = useState(false);
 
   // Cards are shown ordered by priority too, so the grid and Quick Read agree.
   const orderedItems = orderByPriority(items);
 
   const statusLine = isLoading
-    ? "Loading…"
+    ? "Loading..."
     : error
       ? String(error.message ?? error)
       : `${items.length} item${items.length !== 1 ? "s" : ""}`;
+
+  const handleSummaryToneChange = (nextTone: string) => {
+    if (!isSummaryTone(nextTone) || nextTone === summaryTone) {
+      return;
+    }
+
+    writeLocal(SUMMARY_TONE_STORAGE_KEY, nextTone);
+    refreshWithRequest({
+      includeSummary: true,
+      summaryTone: nextTone,
+    });
+  };
 
   return (
     <div className="flex min-h-screen">
@@ -51,6 +87,17 @@ export function DashboardPage() {
             <p className="text-sm text-slate-400 mt-1">{statusLine}</p>
           </div>
           <div className="flex items-center gap-2">
+            <SelectMenu
+              label="TeamGPT tone"
+              value={summaryTone}
+              options={SUMMARY_TONE_OPTIONS.map((tone) => ({
+                value: tone,
+                label: tone,
+              }))}
+              onValueChange={handleSummaryToneChange}
+              helperText="This changes the voice used when the queue brief and item summaries are regenerated."
+              disabled={isLoading}
+            />
             <Button
               variant="outline"
               onClick={() => setQuickReadOpen(true)}
@@ -62,7 +109,7 @@ export function DashboardPage() {
             </Button>
             <Button
               variant="outline"
-              onClick={refresh}
+              onClick={() => refresh()}
               disabled={isCheckingConnection || !isBackendReady || isRefreshing}
               className="rounded-full border-slate-600 hover:border-cyan-500"
             >
@@ -86,7 +133,7 @@ export function DashboardPage() {
           </p>
         )}
 
-        {/* Loading overlay — covers cards and blocks all interaction */}
+        {/* Loading overlay covers cards and blocks all interaction. */}
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-20">
             <PillProgress3D
@@ -106,7 +153,7 @@ export function DashboardPage() {
             <div key={item.id || `card-${item.index}`} className="w-full max-w-[650px]">
               <AISummaryCard
                 item={item}
-                onRegenerate={refresh}
+                onRegenerate={() => refresh()}
                 isRegenerating={isLoading}
               />
             </div>
@@ -123,5 +170,22 @@ export function DashboardPage() {
         items={items}
       />
     </div>
+  );
+}
+
+function isSummaryTone(value: string | null | undefined): value is SummaryTone {
+  return SUMMARY_TONE_OPTIONS.includes(value as SummaryTone);
+}
+
+function readStoredSummaryTone(): SummaryTone {
+  const savedTone = readLocal<string>(SUMMARY_TONE_STORAGE_KEY);
+  return isSummaryTone(savedTone) ? savedTone : DEFAULT_SUMMARY_TONE;
+}
+
+function useStoredSummaryTone(): SummaryTone {
+  return useSyncExternalStore(
+    (onStoreChange) => subscribeLocal(SUMMARY_TONE_STORAGE_KEY, onStoreChange),
+    readStoredSummaryTone,
+    () => DEFAULT_SUMMARY_TONE
   );
 }

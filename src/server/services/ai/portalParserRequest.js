@@ -135,8 +135,14 @@ const SYSTEM_PROMPT = [
   "If generatedAt is not visible in the portal data, leave it as an empty string because the application will stamp the real generation time."
 ].join(" ");
 
-export function buildPortalParserRequest({ model, originalText, testchat, focus }) {
-  const instructions = buildPortalParserInstructions({ testchat, focus });
+export function buildPortalParserRequest({
+  model,
+  originalText,
+  testchat,
+  focus,
+  tone
+}) {
+  const instructions = buildPortalParserInstructions({ testchat, focus, tone });
 
   return testchat
     ? {
@@ -161,23 +167,38 @@ export function buildPortalParserRequest({ model, originalText, testchat, focus 
       };
 }
 
-export function buildPortalParserInstructions({ testchat, focus }) {
+export function buildPortalParserInstructions({ testchat, focus, tone }) {
   const focusLine = normalizeFocus(focus)
     ? `Focus especially on this request context: ${normalizeFocus(focus)}.`
     : "Focus on the most urgent, blocked, and actionable work.";
+  const toneLine = buildToneInstruction(tone);
 
   return testchat
     ? [
         "You review internal portal request data for a single user.",
         "Return a concise plain-text analysis.",
         "Call out asks, deliverables, blockers, urgency, and the clearest next step.",
+        toneLine,
         focusLine
       ].join(" ")
-    : [SYSTEM_PROMPT, focusLine].join(" ");
+    : [SYSTEM_PROMPT, toneLine, focusLine].join(" ");
 }
 
 export { RESPONSE_SCHEMA };
 
 function normalizeFocus(focus) {
   return typeof focus === "string" && focus.trim() ? focus.trim() : null;
+}
+
+function buildToneInstruction(tone) {
+  const normalizedTone =
+    typeof tone === "string" && tone.trim()
+      ? tone.trim()
+      : "Professional + Straightforward";
+
+  return [
+    `Use "${normalizedTone}" as the writing tone for prose fields such as nextAction, summary, deliverable, blockersOpenQuestions, requestHistorySignals, and confidence.reason.`,
+    "Keep the title, statuses, priorities, due-date language, IDs, and field labels factual and easy to scan.",
+    "If the tone is playful, keep it workplace-safe and do not let jokes override the underlying request details."
+  ].join(" ");
 }

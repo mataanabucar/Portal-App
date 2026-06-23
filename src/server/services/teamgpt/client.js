@@ -1,4 +1,4 @@
-const DEFAULT_MODEL = "anthropic.claude-haiku-4-5-20251001-v1:0";
+const DEFAULT_MODEL = "anthropic.claude-sonnet-4-5-20250929-v1:0";
 const DEFAULT_WORD_LIMIT = 1200;
 const DEFAULT_TONE = "Professional + Straightforward";
 const DEFAULT_FORMAT = "plain_text";
@@ -113,11 +113,27 @@ function buildRequestBody(config, options) {
         ]
       }
     ],
-    additionalModelRequestFields:
-      options.additionalModelRequestFields &&
-      typeof options.additionalModelRequestFields === "object"
-        ? options.additionalModelRequestFields
-        : {}
+    additionalModelRequestFields: buildAdditionalModelRequestFields(config, options)
+  };
+}
+
+function buildAdditionalModelRequestFields(config, options) {
+  const optionFields =
+    options.additionalModelRequestFields &&
+    typeof options.additionalModelRequestFields === "object"
+      ? options.additionalModelRequestFields
+      : {};
+
+  return {
+    ...buildDefaultModelRequestFields(config),
+    ...optionFields
+  };
+}
+
+function buildDefaultModelRequestFields(config) {
+  return {
+    large_context_model: normalizeOnOffOption(config?.teamGptLargeContextModel, "on"),
+    extended_thinking: normalizeOnOffOption(config?.teamGptExtendedThinking, "on")
   };
 }
 
@@ -404,4 +420,9 @@ function resolveTimeoutMs(config) {
 
 function normalizeText(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function normalizeOnOffOption(value, fallback) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === "on" || normalized === "off" ? normalized : fallback;
 }

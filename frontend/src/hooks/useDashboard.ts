@@ -26,6 +26,7 @@ export interface UseDashboardResult {
   loadingProgress: number;
   loadingLabel: string;
   refresh: () => void;
+  refreshWithRequest: (nextReq: DashboardRequest) => void;
 }
 
 export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
@@ -38,6 +39,11 @@ export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
   const [loadingProgress, setLoadingProgress] = useState(12);
   const [loadingLabel, setLoadingLabel] = useState("STARTING...");
   const cancelRef = useRef(false);
+  const requestRef = useRef(req);
+
+  useEffect(() => {
+    requestRef.current = req;
+  }, [req]);
 
   // On mount: restore saved queue state first. Only fetch fresh data if there
   // is no stored dashboard payload anywhere.
@@ -105,16 +111,22 @@ export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
           return;
         }
 
-        setLoadingProgress(78);
-        setLoadingLabel("LOADING QUEUE...");
-        const fresh = await api.dashboard(req);
-        if (!cancelRef.current) {
-          await persistDashboardCache(fresh, req);
-          setData(fresh);
-          setError(undefined);
-          setLoadingProgress(100);
-          setLoadingLabel("QUEUE READY");
-          await settleLoading(cancelRef);
+        const stopTrickle = startProgressTrickle(setLoadingProgress, setLoadingLabel);
+        const activeRequest = requestRef.current;
+        try {
+          const fresh = await api.dashboard(activeRequest);
+          stopTrickle();
+          if (!cancelRef.current) {
+            await persistDashboardCache(fresh, activeRequest);
+            setData(fresh);
+            setError(undefined);
+            setLoadingProgress(100);
+            setLoadingLabel("QUEUE READY");
+            await settleLoading(cancelRef);
+          }
+        } catch (innerErr) {
+          stopTrickle();
+          throw innerErr;
         }
       } catch (err) {
         if (!cancelRef.current) {
@@ -137,29 +149,43 @@ export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
     return () => {
       cancelRef.current = true;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  const refresh = () => {
+  const runRefresh = (nextReq?: DashboardRequest) => {
     if (!backendReady) {
       return;
     }
 
+    const activeRequest = nextReq ?? requestRef.current;
+    requestRef.current = activeRequest;
     setRefreshing(true);
     setError(undefined);
-    setLoadingProgress(78);
-    setLoadingLabel("REFRESHING QUEUE...");
+
+    const stopTrickle = startProgressTrickle(setLoadingProgress, setLoadingLabel);
 
     api
-      .dashboard(req)
+      .dashboard(activeRequest)
       .then(async (fresh) => {
-        await persistDashboardCache(fresh, req);
+        stopTrickle();
+        await persistDashboardCache(fresh, activeRequest);
         setData(fresh);
         setLoadingProgress(100);
         setLoadingLabel("QUEUE READY");
         await settleLoading();
       })
-      .catch((err: Error) => setError(err))
+      .catch((err: Error) => {
+        stopTrickle();
+        setError(err);
+      })
       .finally(() => setRefreshing(false));
+  };
+
+  const refresh = () => {
+    runRefresh();
+  };
+
+  const refreshWithRequest = (nextReq: DashboardRequest) => {
+    runRefresh(nextReq);
   };
 
   const items = data ? buildCardItems(data) : [];
@@ -175,6 +201,7 @@ export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
     loadingProgress,
     loadingLabel,
     refresh,
+    refreshWithRequest,
   };
 }
 
@@ -217,6 +244,10 @@ function buildCacheControls(req: DashboardRequest) {
     controls.parserFocus = req.parserFocus;
   }
 
+  if (typeof req.summaryTone === "string") {
+    controls.summaryTone = req.summaryTone;
+  }
+
   return Object.keys(controls).length > 0 ? controls : undefined;
 }
 
@@ -231,4 +262,38 @@ function settleLoading(cancelRef?: { current: boolean }) {
       resolve();
     }, 180);
   });
+}
+
+const TRICKLE_PHASES = [
+  { delay: 0,     progress: 48, label: "FETCHING PORTAL..." },
+  { delay: 2500,  progress: 56, label: "READING ITEMS..." },
+  { delay: 6000,  progress: 63, label: "PARSING CONTENT..." },
+  { delay: 11000, progress: 70, label: "AI PROCESSING..." },
+  { delay: 18000, progress: 77, label: "GENERATING SUMMARIES..." },
+  { delay: 27000, progress: 83, label: "ALMOST THERE..." },
+  { delay: 40000, progress: 89, label: "FINISHING UP..." },
+  { delay: 58000, progress: 93, label: "STILL WORKING..." },
+] as const;
+
+function startProgressTrickle(
+  setProgress: (p: number) => void,
+  setLabel: (l: string) => void,
+): () => void {
+  let cancelled = false;
+  const timers: ReturnType<typeof setTimeout>[] = [];
+
+  for (const phase of TRICKLE_PHASES) {
+    const timer = setTimeout(() => {
+      if (!cancelled) {
+        setProgress(phase.progress);
+        setLabel(phase.label);
+      }
+    }, phase.delay);
+    timers.push(timer);
+  }
+
+  return () => {
+    cancelled = true;
+    timers.forEach(clearTimeout);
+  };
 }

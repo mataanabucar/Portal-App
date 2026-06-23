@@ -98,6 +98,7 @@ export interface SummaryResult {
     provider: string;
     model: string;
     endpoint?: string | null;
+    tone?: string | null;
     instructions: string;
     input: string;
     inputLength: number;
@@ -138,12 +139,14 @@ export interface DashboardCacheRecord {
     parserTestchat?: boolean;
     focus?: string;
     parserFocus?: string;
+    summaryTone?: string;
   };
 }
 
 export interface DashboardRequest {
   includeSummary?: boolean;
   focus?: string;
+  summaryTone?: string;
   parserFocus?: string;
   parserTestchat?: boolean;
   parserProvider?: "teamgpt" | "openai";
@@ -237,13 +240,53 @@ export interface ResearchRequest {
 }
 
 export interface RetrievalStep {
-  tool: "intent" | "list_repos" | "search_code" | "read_file";
+  tool: string;
   summary: string;
+}
+
+// A single piece of evidence — code (Sourcebot) or KB article.
+export interface ResearchFinding {
+  label: string;
+  location: string;
+  webUrl: string | null;
+  language: string | null;
+  snippets: string;
+}
+
+export interface ResearchActionItem {
+  task: string;
+  owner: string;
+  status: string;
+}
+
+export interface ResearchConfidence {
+  level: "Low" | "Medium" | "High";
+  criticalGaps: number;
+  reason: string;
+}
+
+export interface ResearchQuickTake {
+  issue: string;
+  whatWeKnow: string;
+  nextStep: string;
+}
+
+// The structured, tabbed report the UI renders.
+export interface ResearchReport {
+  quickTake: ResearchQuickTake;
+  summaryOfIssue: string;
+  whatWeFound: string[];
+  whatIsMissing: string[];
+  recommendedSearches: string[];
+  confidence: ResearchConfidence;
+  actionItems: ResearchActionItem[];
 }
 
 export interface ResearchResponse {
   ok: true;
-  answer: string;
+  report: ResearchReport;
+  codeFindings: ResearchFinding[];
+  kbFindings: ResearchFinding[];
   chatUrl: string | null;
   retrievalTrail?: RetrievalStep[];
 }
