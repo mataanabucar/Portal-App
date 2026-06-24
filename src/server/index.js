@@ -12,6 +12,7 @@ import { createPortalService } from "./services/portal/index.js";
 import { createPortalGraphAuth } from "./services/graph/portalGraphAuth.js";
 import { createKbService } from "./services/kb/index.js";
 import { createSourcebotService } from "./services/sourcebot/index.js";
+import { createDocsKbService } from "./services/docsKb/index.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
 export function startServer(overrides = {}) {
@@ -21,6 +22,7 @@ export function startServer(overrides = {}) {
   const teamGptAuthService = createTeamGptAuthService(config);
   const kbService = createKbService(config, { teamGptAuthService });
   const sourcebotService = createSourcebotService(config);
+  const docsKbService = createDocsKbService(config);
   const app = createApp({
     config,
     portalService,
@@ -31,6 +33,7 @@ export function startServer(overrides = {}) {
     emailContextSummarizer: createEmailContextSummarizer(config),
     kbService,
     sourcebotService,
+    docsKbService,
     teamGptAuthService,
   });
   let disposed = false;

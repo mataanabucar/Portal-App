@@ -287,6 +287,7 @@ export interface ResearchResponse {
   report: ResearchReport;
   codeFindings: ResearchFinding[];
   kbFindings: ResearchFinding[];
+  docsFindings: ResearchFinding[];
   chatUrl: string | null;
   retrievalTrail?: RetrievalStep[];
 }

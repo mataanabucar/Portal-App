@@ -1,6 +1,10 @@
 import { parseJsonEnv } from "../utils/parseJsonEnv.js";
 
 export function buildConfig(overrides = {}) {
+  // Master AI provider switch. Toggle every feature (parser, summary, ask) at
+  // once via AI_PROVIDER in .env (openai | teamgpt). Per-feature vars
+  // (PARSER_PROVIDER, SUMMARY_PROVIDER, ASK_PROVIDER) override it when set.
+  const defaultAiProvider = normalizeAiProvider(process.env.AI_PROVIDER, "openai");
   const baseConfig = {
     host: process.env.SERVER_HOST || "127.0.0.1",
     port: Number.parseInt(process.env.PORT || "3000", 10),
@@ -63,9 +67,9 @@ export function buildConfig(overrides = {}) {
     openAiApiKey: process.env.OPENAI_API_KEY || "",
     openAiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
     openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
-    summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, "teamgpt"),
-    askProvider: normalizeAiProvider(process.env.ASK_PROVIDER, "teamgpt"),
-    parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, "teamgpt"),
+    summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, defaultAiProvider),
+    askProvider: normalizeAiProvider(process.env.ASK_PROVIDER, defaultAiProvider),
+    parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, defaultAiProvider),
     teamGptPageUrl:
       process.env.TEAMGPT_PAGE_URL ||
       "https://tools.benchmarkdigital.com/gsportal/genai/index.cfm",

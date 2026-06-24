@@ -12,6 +12,7 @@ const MAX_CANDIDATES = 3;
 export async function runResearchPipeline({
   sourcebotService,
   kbService,
+  docsKbService,
   config,
   itemContext,
   userQuery,
@@ -48,7 +49,7 @@ export async function runResearchPipeline({
         : ""),
   });
 
-  const [sourcebotResearch, kbResearch] = await Promise.all([
+  const [sourcebotResearch, kbResearch, docsChunks] = await Promise.all([
     collectSourcebotResearch({
       sourcebotService,
       intent: normalizedIntent,
@@ -61,6 +62,7 @@ export async function runResearchPipeline({
       fallbackTerms: normalizedIntent.fallbackTerms,
       kbAuthToken,
     }),
+    collectDocsResearch(normalizedIntent.primarySearchTerm, docsKbService),
   ]);
 
   trail.push(...sourcebotResearch.trail, ...kbResearch.trail);
@@ -70,28 +72,35 @@ export async function runResearchPipeline({
     ...kbResearch.evidenceBlocks,
   ];
 
-  // Surface the evidence directly so the UI can render distinct Code vs KB tabs.
+  // Surface the evidence directly so the UI can render distinct tabs.
   const codeFindings = sourcebotResearch.evidenceBlocks.map(toFinding);
   const kbFindings = kbResearch.evidenceBlocks.map(toFinding);
+  const docsFindings = docsChunks.map(toFinding);
   const recommendedSearches = mergeTerms(
     [normalizedIntent.primarySearchTerm],
     normalizedIntent.fallbackTerms
   );
 
+  if (docsChunks.length > 0) {
+    trail.push({ tool: "docs", summary: `Docs search: ${docsChunks.length} relevant chunk(s) from internal documentation.` });
+  }
+
   let report;
-  if (evidenceBlocks.length === 0) {
+  if (evidenceBlocks.length === 0 && docsFindings.length === 0) {
     report = buildNoEvidenceReport(normalizedIntent, recommendedSearches);
   } else if (teamGptClient) {
+    const totalBlocks = evidenceBlocks.length + docsFindings.length;
     try {
       report = await synthesizeReportWithTeamGpt(teamGptClient, config, {
         itemContext,
         userQuery,
         messages,
         evidenceBlocks,
+        docsFindings,
       });
       trail.push({
         tool: "synthesize",
-        summary: `Synthesized ${evidenceBlocks.length} evidence block(s) into a structured report with TeamGPT.`,
+        summary: `Synthesized ${totalBlocks} evidence block(s) into a structured report with TeamGPT.`,
       });
     } catch (error) {
       console.error("[research-pipeline] TeamGPT synthesis failed:", error.message);
@@ -101,20 +110,23 @@ export async function runResearchPipeline({
             userQuery,
             messages,
             evidenceBlocks,
+            docsFindings,
           }).catch(() => buildFallbackReport(evidenceBlocks, normalizedIntent))
         : buildFallbackReport(evidenceBlocks, normalizedIntent);
     }
   } else if (openai) {
+    const totalBlocks = evidenceBlocks.length + docsFindings.length;
     try {
       report = await synthesizeReportWithOpenAi(openai, model, {
         itemContext,
         userQuery,
         messages,
         evidenceBlocks,
+        docsFindings,
       });
       trail.push({
         tool: "synthesize",
-        summary: `Synthesized ${evidenceBlocks.length} evidence block(s) into a structured report with OpenAI.`,
+        summary: `Synthesized ${totalBlocks} evidence block(s) into a structured report with OpenAI.`,
       });
     } catch (error) {
       console.error("[research-pipeline] OpenAI synthesis failed:", error.message);
@@ -131,6 +143,7 @@ export async function runResearchPipeline({
     report,
     codeFindings,
     kbFindings,
+    docsFindings,
     retrievalTrail: trail,
     chatUrl: sourcebotResearch.chatUrl || null,
   };
@@ -144,6 +157,23 @@ function toFinding(block) {
     language: block.language || null,
     snippets: block.snippets || "",
   };
+}
+
+async function collectDocsResearch(query, docsKbService) {
+  if (!docsKbService) return [];
+  try {
+    const chunks = await docsKbService.search(query);
+    return chunks.map((chunk) => ({
+      label: chunk.heading,
+      location: chunk.docPath,
+      webUrl: null,
+      language: "markdown",
+      snippets: chunk.text,
+    }));
+  } catch (error) {
+    console.warn("[research-pipeline] Docs search failed:", error.message);
+    return [];
+  }
 }
 
 async function collectSourcebotResearch({ sourcebotService, intent, applicationMatch }) {
@@ -385,10 +415,10 @@ function rankCandidates(files, relevantRepos, pathPrefixes = []) {
     .sort((a, b) => b.score - a.score);
 }
 
-async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext, userQuery, messages, evidenceBlocks }) {
+async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext, userQuery, messages, evidenceBlocks, docsFindings = [] }) {
   const response = await teamGptClient.completeText({
     instructions: buildSynthesisInstructions(),
-    prompt: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks }),
+    prompt: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks, docsFindings }),
     model: config.teamGptModel,
     wordLimit: 1200,
     tone: "Professional + Straightforward",
@@ -403,12 +433,12 @@ async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext,
   return normalizeReport(parsed);
 }
 
-async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuery, messages, evidenceBlocks }) {
+async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuery, messages, evidenceBlocks, docsFindings = [] }) {
   const response = await openai.responses.create({
     model,
     store: false,
     instructions: buildSynthesisInstructions(),
-    input: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks }),
+    input: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks, docsFindings }),
   });
 
   const parsed = parseReportJson(response.output_text);
@@ -421,7 +451,7 @@ async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuer
 function buildSynthesisInstructions() {
   return [
     "You are a technical assistant helping resolve Benchmark Digital portal support items.",
-    "You will receive code evidence from Sourcebot and documentation evidence from the internal Knowledge Base.",
+    "You will receive code evidence from Sourcebot, documentation evidence from the internal Knowledge Base, and excerpts from internal technical documentation files.",
     "",
     "DOMAIN PRIMER — the target system is the ATS Audit (Action Tracking System), a ColdFusion (CFML) app:",
     "- Pages are server-rendered .cfm templates; AJAX goes through audit/remoteproxy.cfm (a JSON-RPC gateway) and form saves go through audit/audaction.cfm.",
@@ -534,7 +564,7 @@ function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks }) {
+function buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks, docsFindings = [] }) {
   const historyText =
     messages.length > 0
       ? "\n\nPrevious conversation:\n" +
@@ -557,12 +587,24 @@ function buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks 
     })
     .join("\n\n---\n\n");
 
+  const docsText = docsFindings.length > 0
+    ? docsFindings
+        .map((chunk, index) => [
+          `### Doc ${index + 1}: ${chunk.label}`,
+          `File: ${chunk.location}`,
+          "",
+          chunk.snippets,
+        ].join("\n"))
+        .join("\n\n---\n\n")
+    : "";
+
   return [
     `Portal item context:\n${itemContext}`,
     historyText,
-    `\nEvidence:\n${evidenceText}`,
+    evidenceBlocks.length > 0 ? `\nEvidence:\n${evidenceText}` : "",
+    docsText ? `\nInternal Documentation:\n${docsText}` : "",
     `\nUser question:\n${userQuery}`,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 // Deterministic structured report when no LLM is available or JSON parsing fails.

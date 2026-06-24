@@ -16,6 +16,7 @@ import {
   BarChart3,
   Code2,
   BookOpen,
+  BookMarked,
   HelpCircle,
   ListChecks,
   Info,
@@ -40,7 +41,7 @@ interface ResearchModalProps {
   item: DashboardCardItem;
 }
 
-type TabId = "overview" | "code" | "kb" | "missing" | "actions";
+type TabId = "overview" | "code" | "kb" | "docs" | "missing" | "actions";
 
 function buildItemContext(item: DashboardCardItem): string {
   const kd = (label: string) =>
@@ -83,6 +84,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
   const [report, setReport] = useState<ResearchReport | null>(null);
   const [codeFindings, setCodeFindings] = useState<ResearchFinding[]>([]);
   const [kbFindings, setKbFindings] = useState<ResearchFinding[]>([]);
+  const [docsFindings, setDocsFindings] = useState<ResearchFinding[]>([]);
   const [retrievalTrail, setRetrievalTrail] = useState<RetrievalStep[]>([]);
   const [messages, setMessages] = useState<ResearchMessage[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -117,6 +119,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
     setReport(null);
     setCodeFindings([]);
     setKbFindings([]);
+    setDocsFindings([]);
     setRetrievalTrail([]);
     setMessages([]);
     setActiveTab("overview");
@@ -139,6 +142,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
       setReport(res.report);
       setCodeFindings(res.codeFindings ?? []);
       setKbFindings(res.kbFindings ?? []);
+      setDocsFindings(res.docsFindings ?? []);
       setRetrievalTrail(res.retrievalTrail ?? []);
       if (res.chatUrl) setChatUrl(res.chatUrl);
       setActiveTab("overview");
@@ -247,6 +251,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
                 setActiveTab={setActiveTab}
                 codeCount={codeFindings.length}
                 kbCount={kbFindings.length}
+                docsCount={docsFindings.length}
                 missingCount={report.whatIsMissing.length}
                 actionCount={report.actionItems.length}
               />
@@ -255,6 +260,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
                 report={report}
                 codeFindings={codeFindings}
                 kbFindings={kbFindings}
+                docsFindings={docsFindings}
                 retrievalTrail={retrievalTrail}
                 itemId={item.id}
               />
@@ -388,6 +394,7 @@ const TAB_META: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Overview", icon: <Info className="w-3.5 h-3.5" /> },
   { id: "code", label: "Code Findings", icon: <Code2 className="w-3.5 h-3.5" /> },
   { id: "kb", label: "KB Findings", icon: <BookOpen className="w-3.5 h-3.5" /> },
+  { id: "docs", label: "Docs", icon: <BookMarked className="w-3.5 h-3.5" /> },
   { id: "missing", label: "Missing Info", icon: <HelpCircle className="w-3.5 h-3.5" /> },
   { id: "actions", label: "Actions", icon: <ListChecks className="w-3.5 h-3.5" /> },
 ];
@@ -397,6 +404,7 @@ function Tabs({
   setActiveTab,
   codeCount,
   kbCount,
+  docsCount,
   missingCount,
   actionCount,
 }: {
@@ -404,6 +412,7 @@ function Tabs({
   setActiveTab: (t: TabId) => void;
   codeCount: number;
   kbCount: number;
+  docsCount: number;
   missingCount: number;
   actionCount: number;
 }) {
@@ -411,6 +420,7 @@ function Tabs({
     overview: null,
     code: codeCount,
     kb: kbCount,
+    docs: docsCount,
     missing: missingCount,
     actions: actionCount,
   };
@@ -449,6 +459,7 @@ function TabContent({
   report,
   codeFindings,
   kbFindings,
+  docsFindings,
   retrievalTrail,
   itemId,
 }: {
@@ -456,6 +467,7 @@ function TabContent({
   report: ResearchReport;
   codeFindings: ResearchFinding[];
   kbFindings: ResearchFinding[];
+  docsFindings: ResearchFinding[];
   retrievalTrail: RetrievalStep[];
   itemId: string;
 }) {
@@ -495,6 +507,10 @@ function TabContent({
 
   if (activeTab === "kb") {
     return <FindingsList findings={kbFindings} emptyText="No Knowledge Base articles matched this item." />;
+  }
+
+  if (activeTab === "docs") {
+    return <FindingsList findings={docsFindings} emptyText="No internal documentation matched this item." />;
   }
 
   if (activeTab === "missing") {

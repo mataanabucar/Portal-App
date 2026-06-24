@@ -27,7 +27,7 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, sourcebotService, teamGptAuthService }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, sourcebotService, docsKbService, teamGptAuthService }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -64,7 +64,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
               parser: runtimeParser.describe(),
               ask: runtimeAsker.describe(),
               kb: kbService?.describe() ?? { enabled: false },
-              sourcebot: sourcebotService?.describe() ?? { enabled: false }
+              sourcebot: sourcebotService?.describe() ?? { enabled: false },
+              docsKb: docsKbService?.describe() ?? { enabled: false }
             },
             testing: {
               usingTesterConfig
@@ -353,9 +354,10 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const canUseKb =
         Boolean(kbStatus.enabled) &&
         Boolean(kbStatus.authConfigured || request.headers.authorization);
+      const canUseDocs = Boolean(docsKbService?.describe?.()?.enabled);
 
-      if (!canUseSourcebot && !canUseKb) {
-        response.status(503).json({ ok: false, error: "Neither Sourcebot nor Knowledge Base research is configured." });
+      if (!canUseSourcebot && !canUseKb && !canUseDocs) {
+        response.status(503).json({ ok: false, error: "No research sources are configured (Sourcebot, KB, or Docs)." });
         return;
       }
 
@@ -368,6 +370,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const result = await runResearchPipeline({
         sourcebotService,
         kbService,
+        docsKbService,
         config,
         itemContext,
         userQuery: query.trim(),
@@ -381,6 +384,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         report: result.report,
         codeFindings: result.codeFindings,
         kbFindings: result.kbFindings,
+        docsFindings: result.docsFindings,
         chatUrl: result.chatUrl,
         retrievalTrail: result.retrievalTrail,
       });
