@@ -44,8 +44,8 @@ export function createAskService(config, { teamGptAuthService } = {}) {
           instructions: buildInstructions(),
           prompt: normalizedPrompt,
           model,
-          wordLimit: 1200,
-          tone: "Professional + Straightforward",
+          wordLimit: normalizePositiveNumber(options.wordLimit, 1200),
+          tone: normalizePrompt(options.tone) || "Professional + Straightforward",
           format: "plain_text",
           temperature: 0.2,
           threadId: normalizePrompt(options.threadId)
@@ -130,6 +130,11 @@ function buildDebugObject({ requestId, model, provider, openaiResponseId, thread
 
 function normalizePrompt(prompt) {
   return typeof prompt === "string" ? prompt.trim() : "";
+}
+
+function normalizePositiveNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function resolveModel(config, requestedModel, provider) {

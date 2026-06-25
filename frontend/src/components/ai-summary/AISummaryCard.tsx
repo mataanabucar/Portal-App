@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowRight,
   FileText,
@@ -16,6 +16,9 @@ import {
   BadgeCheck,
   Clock3,
   LayoutList,
+  Volume2,
+  Loader2,
+  Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TitleStatusPanel } from "./TitleStatusPanel";
@@ -23,6 +26,14 @@ import { SummarySection } from "./SummarySection";
 import { KeyDetailsPanel, visibleKeyDetailRows } from "./KeyDetailsPanel";
 import { ResearchModal } from "@/components/research/ResearchModal";
 import { cn } from "@/lib/utils";
+import {
+  type TtsState,
+  VOICE_REPLAY_TTS_INSTRUCTIONS,
+  playPortalTts,
+  stopPortalTts,
+} from "@/lib/tts";
+import { readTtsConfig } from "@/lib/ttsConfig";
+import { buildQueueItemVoiceReplayReport } from "@/lib/ttsBuildText";
 import type {
   ConfidenceLevel,
   DashboardCardItem,
@@ -56,6 +67,73 @@ export function AISummaryCard({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [ttsState, setTtsState] = useState<TtsState>("idle");
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const voiceReplayAbortRef = useRef<AbortController | null>(null);
+
+  async function buildVoiceReplayText() {
+    const reportText = buildQueueItemVoiceReplayReport(item);
+    const abortController = new AbortController();
+    voiceReplayAbortRef.current = abortController;
+
+    const res = await fetch("/api/tts/card-replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ item, reportText }),
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((errBody as { error?: string }).error ?? res.statusText);
+    }
+
+    const payload = (await res.json()) as { text?: string };
+    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    if (!text) {
+      throw new Error("Voice replay returned empty text.");
+    }
+    return text;
+  }
+
+  async function handleListen() {
+    const cfg = readTtsConfig();
+    setTtsError(null);
+    stopPortalTts();
+    voiceReplayAbortRef.current?.abort();
+    setTtsState("loading");
+
+    try {
+      const text = await buildVoiceReplayText();
+      voiceReplayAbortRef.current = null;
+      await playPortalTts({
+        text,
+        voice: cfg.voice,
+        instructions: VOICE_REPLAY_TTS_INSTRUCTIONS,
+        speed: cfg.speed,
+        playbackRate: cfg.playbackRate,
+        format: cfg.responseFormat,
+        onStateChange: setTtsState,
+        onError: (msg) => {
+          setTtsError(msg);
+          setTimeout(() => setTtsError(null), 4000);
+        },
+      });
+    } catch (err) {
+      voiceReplayAbortRef.current = null;
+      if ((err as Error).name === "AbortError") return;
+      setTtsState("idle");
+      setTtsError((err as Error).message);
+      setTimeout(() => setTtsError(null), 4000);
+    }
+  }
+
+  function handleTtsStop() {
+    voiceReplayAbortRef.current?.abort();
+    voiceReplayAbortRef.current = null;
+    stopPortalTts();
+    setTtsState("idle");
+  }
 
   const generatedLabel = formatGeneratedAt(item.generatedAt);
   const shownKeyDetails = visibleKeyDetailRows(item.keyDetails);
@@ -109,6 +187,31 @@ export function AISummaryCard({
             <Search className="w-3.5 h-3.5" />
             Research
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={ttsState === "idle" ? handleListen : handleTtsStop}
+            disabled={isRegenerating}
+            className="rounded-full border-teal-600/35 bg-slate-900/80 text-teal-300 hover:border-teal-400/55 hover:bg-slate-800 text-xs font-bold tracking-wide"
+          >
+            {ttsState === "loading" ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : ttsState === "playing" ? (
+              <Square className="w-3 h-3 fill-current" />
+            ) : (
+              <Volume2 className="w-3.5 h-3.5" />
+            )}
+            {ttsState === "idle" ? "Listen" : ttsState === "loading" ? "Loading..." : "Stop"}
+          </Button>
+          {ttsState === "playing" && (
+            <span className="flex items-center gap-1.5 text-xs text-teal-300 whitespace-nowrap">
+              <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+              Reading aloud
+            </span>
+          )}
+          {ttsError && (
+            <span className="text-xs text-red-400 whitespace-nowrap">{ttsError}</span>
+          )}
           {generatedLabel && (
             <p className="text-xs text-slate-400 flex items-center gap-1.5 whitespace-nowrap ml-auto">
               <Clock className="w-3.5 h-3.5" />

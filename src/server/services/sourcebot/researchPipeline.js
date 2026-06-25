@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import { collectKbResearch } from "../kb/research.js";
 import { createTeamGptClient } from "../teamgpt/client.js";
 import {
+  APPLICATION_DISAMBIGUATION_RULES,
+  APPLICATION_ROUTING_INSTRUCTION,
   RESEARCH_REPO_PREFIXES,
   resolveApplicationContext,
 } from "./applicationCatalog.js";
@@ -45,7 +47,7 @@ export async function runResearchPipeline({
     summary:
       `Primary search: "${normalizedIntent.primarySearchTerm}" | Repo hint: "${normalizedIntent.repoHint}"` +
       (applicationMatch
-        ? ` | App: ${applicationMatch.canonicalName} -> ${applicationMatch.repoSearchOrder.join(", ")}`
+        ? ` | App: ${applicationMatch.appid} ${applicationMatch.canonicalName} -> ${applicationMatch.repoSearchOrder.join(", ")}`
         : ""),
   });
 
@@ -97,6 +99,7 @@ export async function runResearchPipeline({
         messages,
         evidenceBlocks,
         docsFindings,
+        applicationMatch,
       });
       trail.push({
         tool: "synthesize",
@@ -111,6 +114,7 @@ export async function runResearchPipeline({
             messages,
             evidenceBlocks,
             docsFindings,
+            applicationMatch,
           }).catch(() => buildFallbackReport(evidenceBlocks, normalizedIntent))
         : buildFallbackReport(evidenceBlocks, normalizedIntent);
     }
@@ -123,6 +127,7 @@ export async function runResearchPipeline({
         messages,
         evidenceBlocks,
         docsFindings,
+        applicationMatch,
       });
       trail.push({
         tool: "synthesize",
@@ -351,6 +356,8 @@ async function extractIntent(openai, model, itemContext, userQuery) {
   const instructions = [
     "You are a code search assistant for Benchmark Digital, a cloud-based EHS software platform built on ColdFusion.",
     "Extract search terms from a portal support item and user question.",
+    APPLICATION_ROUTING_INSTRUCTION,
+    `Negative app rules: ${APPLICATION_DISAMBIGUATION_RULES.join("; ")}.`,
     "Return only valid JSON with no markdown and no explanation.",
     'Shape: { "repoHint": "...", "primarySearchTerm": "...", "fallbackTerms": ["..."] }',
     "repoHint: 1-2 word keyword for repo search. Prefer the real repo-family keyword from the Application field when available.",
@@ -415,9 +422,9 @@ function rankCandidates(files, relevantRepos, pathPrefixes = []) {
     .sort((a, b) => b.score - a.score);
 }
 
-async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext, userQuery, messages, evidenceBlocks, docsFindings = [] }) {
+async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext, userQuery, messages, evidenceBlocks, docsFindings = [], applicationMatch = null }) {
   const response = await teamGptClient.completeText({
-    instructions: buildSynthesisInstructions(),
+    instructions: buildSynthesisInstructions(applicationMatch),
     prompt: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks, docsFindings }),
     model: config.teamGptModel,
     wordLimit: 1200,
@@ -433,11 +440,11 @@ async function synthesizeReportWithTeamGpt(teamGptClient, config, { itemContext,
   return normalizeReport(parsed);
 }
 
-async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuery, messages, evidenceBlocks, docsFindings = [] }) {
+async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuery, messages, evidenceBlocks, docsFindings = [], applicationMatch = null }) {
   const response = await openai.responses.create({
     model,
     store: false,
-    instructions: buildSynthesisInstructions(),
+    instructions: buildSynthesisInstructions(applicationMatch),
     input: buildSynthesisInput({ itemContext, userQuery, messages, evidenceBlocks, docsFindings }),
   });
 
@@ -448,19 +455,15 @@ async function synthesizeReportWithOpenAi(openai, model, { itemContext, userQuer
   return normalizeReport(parsed);
 }
 
-function buildSynthesisInstructions() {
+function buildSynthesisInstructions(applicationMatch = null) {
   return [
     "You are a technical assistant helping resolve Benchmark Digital portal support items.",
     "You will receive code evidence from Sourcebot, documentation evidence from the internal Knowledge Base, and excerpts from internal technical documentation files.",
     "",
-    "DOMAIN PRIMER — the target system is the ATS Audit (Action Tracking System), a ColdFusion (CFML) app:",
-    "- Pages are server-rendered .cfm templates; AJAX goes through audit/remoteproxy.cfm (a JSON-RPC gateway) and form saves go through audit/audaction.cfm.",
-    "- Business logic lives in CFCs under cfc/apps/ats/ (audit.cfc is the ~11k-line core).",
-    "- Feature flags, field visibility and labels come from setup variables: api.go.getSetupVar(var, busid, siteid, appid, default).",
-    "- Custom/additional fields are stored in the extensions_data EAV table (Record_Name/Record_Value keyed by Record_Group_ID); standard data is in tblAudit.",
-    "- Findings carry RefType/RefID reference links (e.g. ats5Why), ResponPerson (Responsible Person), Status, ClosureDueDate.",
-    "- Edit/permission gating uses request.permissions.accessRights / accessLevel (e.g. Level 3 users).",
-    "Frame findings, gaps and next steps in these real ATS terms when the evidence supports it. Never invent setup vars, columns, or files not present in the evidence.",
+    APPLICATION_ROUTING_INSTRUCTION,
+    "App identity profile schema: appid, application, repo, aliases, shortname, AppAbr, intentTerms, exclusionTerms.",
+    `Negative app rules: ${APPLICATION_DISAMBIGUATION_RULES.join("; ")}.`,
+    buildMatchedApplicationInstruction(applicationMatch),
     "",
     "Answer ONLY from the supplied evidence. Do not invent implementation details or KB content.",
     "Return your answer as STRICT JSON only — no markdown, no code fences, no prose outside the JSON object.",
@@ -475,6 +478,29 @@ function buildSynthesisInstructions() {
     "}",
     "Cite code claims with repo/path references and KB claims with content titles or content IDs inside the relevant bullets when visible.",
     "Keep every field concise and action-oriented. Provide 2-5 items for whatWeFound, whatIsMissing, and actionItems.",
+  ].join("\n");
+}
+
+function buildMatchedApplicationInstruction(applicationMatch) {
+  if (!applicationMatch) {
+    return "No app identity profile was confidently matched. Use only supplied evidence and avoid assuming ATS, Calendar, Audit Assistant, Audit Planner, or SAFER.";
+  }
+
+  const profile = {
+    appid: applicationMatch.appid,
+    application: applicationMatch.application,
+    repo: applicationMatch.repo,
+    aliases: applicationMatch.aliases,
+    shortname: applicationMatch.shortname,
+    AppAbr: applicationMatch.AppAbr,
+    intentTerms: applicationMatch.intentTerms,
+    exclusionTerms: applicationMatch.exclusionTerms,
+  };
+
+  return [
+    "Matched app identity profile:",
+    JSON.stringify(profile),
+    "Frame findings, gaps, and next steps in this app's real terms when the evidence supports it. Never invent setup vars, columns, or files not present in the evidence.",
   ].join("\n");
 }
 

@@ -20,6 +20,9 @@ import {
   HelpCircle,
   ListChecks,
   Info,
+  Volume2,
+  Loader2,
+  Square,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -27,6 +30,20 @@ import { Button } from "@/components/ui/button";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
 import { readLocal, writeLocal } from "@/lib/storage";
 import { api } from "@/lib/api";
+import {
+  type TtsState,
+  VOICE_REPLAY_TTS_INSTRUCTIONS,
+  playPortalTts,
+  stopPortalTts,
+} from "@/lib/tts";
+import { readTtsConfig } from "@/lib/ttsConfig";
+import {
+  buildQuickTakeTtsText,
+  buildOverviewTtsText,
+  buildMissingInfoTtsText,
+  buildActionsTtsText,
+  buildResearchVoiceReplayReport,
+} from "@/lib/ttsBuildText";
 import type {
   DashboardCardItem,
   ResearchFinding,
@@ -93,6 +110,10 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
   const [error, setError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState(0);
   const [chatUrl, setChatUrl] = useState<string | null>(null);
+  const [ttsState, setTtsState] = useState<TtsState>("idle");
+  const [ttsActiveKey, setTtsActiveKey] = useState<string | null>(null);
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const voiceReplayAbortRef = useRef<AbortController | null>(null);
   const crawlRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const itemContext = useMemo(() => buildItemContext(item), [item]);
@@ -172,6 +193,96 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
     }
   }
 
+  async function buildResearchReplayText(key: string, sectionLabel: string, sectionText: string) {
+    if (!report) {
+      throw new Error("Research report is not ready.");
+    }
+
+    const reportText = buildResearchVoiceReplayReport({
+      item,
+      report,
+      sectionLabel,
+      sectionText,
+    });
+    const abortController = new AbortController();
+    voiceReplayAbortRef.current = abortController;
+
+    const res = await fetch("/api/tts/card-replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        reportText,
+        item: {
+          replayType: "research-section",
+          sectionKey: key,
+          sectionLabel,
+          portalItem: item,
+          researchReport: report,
+        },
+      }),
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((errBody as { error?: string }).error ?? res.statusText);
+    }
+
+    const payload = (await res.json()) as { text?: string };
+    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    if (!text) {
+      throw new Error("Research voice replay returned empty text.");
+    }
+    return text;
+  }
+
+  async function handleModalListen(key: string, text: string, sectionLabel = "Research section") {
+    const cfg = readTtsConfig();
+    stopPortalTts();
+    voiceReplayAbortRef.current?.abort();
+    setTtsActiveKey(key);
+    setTtsError(null);
+    setTtsState("loading");
+
+    try {
+      const replayText = await buildResearchReplayText(key, sectionLabel, text);
+      voiceReplayAbortRef.current = null;
+      await playPortalTts({
+        text: replayText,
+        voice: cfg.voice,
+        instructions: VOICE_REPLAY_TTS_INSTRUCTIONS,
+        speed: cfg.speed,
+        playbackRate: cfg.playbackRate,
+        format: cfg.responseFormat,
+        onStateChange: (state) => {
+          setTtsState(state);
+          if (state === "idle") setTtsActiveKey(null);
+        },
+        onError: (msg) => {
+          setTtsError(msg);
+          setTimeout(() => setTtsError(null), 4000);
+        },
+      });
+    } catch (err) {
+      voiceReplayAbortRef.current = null;
+      if ((err as Error).name === "AbortError") return;
+      setTtsState("idle");
+      setTtsActiveKey(null);
+      setTtsError((err as Error).message);
+      setTimeout(() => setTtsError(null), 4000);
+    }
+  }
+
+  function handleModalStop() {
+    voiceReplayAbortRef.current?.abort();
+    voiceReplayAbortRef.current = null;
+    stopPortalTts();
+    setTtsState("idle");
+    setTtsActiveKey(null);
+  }
+
+  const ttsLoadingKey = ttsState !== "idle" ? ttsActiveKey : null;
+
   if (!open) return null;
 
   const showReport = !loading && report;
@@ -199,7 +310,29 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
               <p className="text-sm font-semibold text-slate-200 truncate">{item.title}</p>
             </div>
           </div>
-          <div className="flex items-center gap-3 ml-4 shrink-0">
+          <div className="flex items-center gap-2 ml-4 shrink-0 flex-wrap justify-end">
+            {ttsState !== "idle" && (
+              <div className="flex items-center gap-1.5 text-xs border border-slate-700/40 rounded-lg px-2.5 py-1.5 bg-slate-900/60">
+                {ttsState === "loading" ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-teal-400" />
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                )}
+                <span className="text-teal-300 font-medium">
+                  {ttsState === "loading" ? "Generating audio..." : "Reading aloud"}
+                </span>
+                <button
+                  onClick={handleModalStop}
+                  className="text-slate-400 hover:text-red-400 transition-colors ml-0.5"
+                  title="Stop"
+                >
+                  <Square className="w-3 h-3 fill-current" />
+                </button>
+              </div>
+            )}
+            {ttsError && (
+              <span className="text-xs text-red-400">{ttsError}</span>
+            )}
             {chatUrl && (
               <a
                 href={chatUrl}
@@ -244,7 +377,13 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
 
           {showReport && (
             <div className="px-6 py-5 space-y-5">
-              <QuickTake report={report} />
+              <QuickTake
+                report={report}
+                onListen={() =>
+                  handleModalListen("quicktake", buildQuickTakeTtsText(report), "Quick Take")
+                }
+                ttsLoading={ttsLoadingKey === "quicktake"}
+              />
               <StatusCards item={item} report={report} />
               <Tabs
                 activeTab={activeTab}
@@ -263,6 +402,8 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
                 docsFindings={docsFindings}
                 retrievalTrail={retrievalTrail}
                 itemId={item.id}
+                onListen={handleModalListen}
+                ttsLoadingKey={ttsLoadingKey}
               />
             </div>
           )}
@@ -300,7 +441,15 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
 
 // ── Quick Take ────────────────────────────────────────────────────────────────
 
-function QuickTake({ report }: { report: ResearchReport }) {
+function QuickTake({
+  report,
+  onListen,
+  ttsLoading,
+}: {
+  report: ResearchReport;
+  onListen?: () => void;
+  ttsLoading?: boolean;
+}) {
   const { quickTake } = report;
   if (!quickTake.issue && !quickTake.whatWeKnow && !quickTake.nextStep) return null;
 
@@ -310,9 +459,24 @@ function QuickTake({ report }: { report: ResearchReport }) {
         <Search className="w-4 h-4 text-violet-300" />
       </div>
       <div className="min-w-0 space-y-2">
-        <p className="text-[0.7rem] font-semibold tracking-[0.2em] text-violet-300 uppercase">
-          Quick Take
-        </p>
+        <div className="flex items-center gap-2">
+          <p className="text-[0.7rem] font-semibold tracking-[0.2em] text-violet-300 uppercase">
+            Quick Take
+          </p>
+          {onListen && (
+            <button
+              onClick={onListen}
+              className="text-slate-500 hover:text-teal-300 transition-colors"
+              title="Listen to Quick Take"
+            >
+              {ttsLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-400" />
+              ) : (
+                <Volume2 className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+        </div>
         {quickTake.issue && (
           <QuickTakeRow icon={<AlertTriangle className="w-4 h-4 text-amber-400" />} label="Issue" text={quickTake.issue} />
         )}
@@ -462,6 +626,8 @@ function TabContent({
   docsFindings,
   retrievalTrail,
   itemId,
+  onListen,
+  ttsLoadingKey,
 }: {
   activeTab: TabId;
   report: ResearchReport;
@@ -470,11 +636,19 @@ function TabContent({
   docsFindings: ResearchFinding[];
   retrievalTrail: RetrievalStep[];
   itemId: string;
+  onListen?: (key: string, text: string, sectionLabel?: string) => void;
+  ttsLoadingKey?: string | null;
 }) {
   if (activeTab === "overview") {
     return (
       <div className="space-y-5">
-        <Section number={1} title="Summary of the Issue" icon={<FileText className="w-4 h-4 text-violet-400" />}>
+        <Section
+          number={1}
+          title="Summary of the Issue"
+          icon={<FileText className="w-4 h-4 text-violet-400" />}
+          onListen={onListen ? () => onListen("overview", buildOverviewTtsText(report), "Overview") : undefined}
+          ttsLoading={ttsLoadingKey === "overview"}
+        >
           {report.summaryOfIssue ? (
             <MarkdownBody content={report.summaryOfIssue} />
           ) : (
@@ -515,14 +689,24 @@ function TabContent({
 
   if (activeTab === "missing") {
     return (
-      <Section title="What Is Missing" icon={<HelpCircle className="w-4 h-4 text-amber-400" />}>
+      <Section
+        title="What Is Missing"
+        icon={<HelpCircle className="w-4 h-4 text-amber-400" />}
+        onListen={onListen ? () => onListen("missing", buildMissingInfoTtsText(report), "Missing Info") : undefined}
+        ttsLoading={ttsLoadingKey === "missing"}
+      >
         <BulletList items={report.whatIsMissing} emptyText="Nothing flagged as missing." />
       </Section>
     );
   }
 
   return (
-    <Section title="Action Items" icon={<ListChecks className="w-4 h-4 text-violet-400" />}>
+    <Section
+      title="Action Items"
+      icon={<ListChecks className="w-4 h-4 text-violet-400" />}
+      onListen={onListen ? () => onListen("actions", buildActionsTtsText(report), "Actions") : undefined}
+      ttsLoading={ttsLoadingKey === "actions"}
+    >
       <ActionItemsTable items={report.actionItems} itemId={itemId} />
     </Section>
   );
@@ -535,11 +719,15 @@ function Section({
   title,
   icon,
   children,
+  onListen,
+  ttsLoading,
 }: {
   number?: number;
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
+  onListen?: () => void;
+  ttsLoading?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-slate-800/70 bg-slate-900/30 p-4">
@@ -551,6 +739,19 @@ function Section({
         )}
         {icon}
         <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
+        {onListen && (
+          <button
+            onClick={onListen}
+            className="ml-auto text-slate-500 hover:text-teal-300 transition-colors"
+            title="Listen to this section"
+          >
+            {ttsLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-400" />
+            ) : (
+              <Volume2 className="w-3.5 h-3.5" />
+            )}
+          </button>
+        )}
       </div>
       {children}
     </div>

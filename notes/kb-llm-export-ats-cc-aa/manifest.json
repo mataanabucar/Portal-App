@@ -1,0 +1,370 @@
+{
+  "generated_at": "2026-06-25T06:48:37.008Z",
+  "output_dir": "C:\\Users\\700000347\\OneDrive - Gensuite LLC\\Desktop\\Portal App\\notes\\kb-llm-export-ats-cc-aa",
+  "source": "Portal App built-in KB API: src/server/services/kb/index.js",
+  "auth_source": "TeamGPT JWT fallback via src/server/services/teamgpt/auth.js when needed",
+  "products": {
+    "ats": {
+      "label": "Action Tracking System",
+      "acronym": "ATS",
+      "context": {},
+      "full": {},
+      "acronymPattern": {}
+    },
+    "cc": {
+      "label": "Compliance Calendar",
+      "acronym": "CC",
+      "context": {},
+      "full": {},
+      "acronymPattern": {}
+    },
+    "aa": {
+      "label": "Audit Assistant",
+      "acronym": "AA",
+      "context": {},
+      "full": {},
+      "acronymPattern": {}
+    }
+  },
+  "queries": [
+    {
+      "product": "ats",
+      "kind": "full",
+      "query": "\"Action Tracking System\"",
+      "cap": 250
+    },
+    {
+      "product": "ats",
+      "kind": "full",
+      "query": "Action Tracking System",
+      "cap": 250
+    },
+    {
+      "product": "ats",
+      "kind": "acronym",
+      "query": "ATS",
+      "cap": 150
+    },
+    {
+      "product": "ats",
+      "kind": "acronym_context",
+      "query": "ATS action tracking",
+      "cap": 200
+    },
+    {
+      "product": "cc",
+      "kind": "full",
+      "query": "\"Compliance Calendar\"",
+      "cap": 250
+    },
+    {
+      "product": "cc",
+      "kind": "full",
+      "query": "Compliance Calendar",
+      "cap": 250
+    },
+    {
+      "product": "cc",
+      "kind": "acronym",
+      "query": "CC",
+      "cap": 150
+    },
+    {
+      "product": "cc",
+      "kind": "acronym_context",
+      "query": "CC compliance calendar",
+      "cap": 200
+    },
+    {
+      "product": "aa",
+      "kind": "full",
+      "query": "\"Audit Assistant\"",
+      "cap": 250
+    },
+    {
+      "product": "aa",
+      "kind": "full",
+      "query": "Audit Assistant",
+      "cap": 250
+    },
+    {
+      "product": "aa",
+      "kind": "acronym",
+      "query": "AA",
+      "cap": 150
+    },
+    {
+      "product": "aa",
+      "kind": "acronym_context",
+      "query": "AA audit assistant",
+      "cap": 200
+    }
+  ],
+  "search_runs": [
+    {
+      "product": "ats",
+      "kind": "full",
+      "query": "\"Action Tracking System\"",
+      "cap": 250,
+      "start": 0,
+      "limit": 100,
+      "returned": 78,
+      "total": 78,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "full",
+      "query": "Action Tracking System",
+      "cap": 250,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 1751,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "full",
+      "query": "Action Tracking System",
+      "cap": 250,
+      "start": 100,
+      "limit": 100,
+      "returned": 100,
+      "total": 1751,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "full",
+      "query": "Action Tracking System",
+      "cap": 250,
+      "start": 200,
+      "limit": 50,
+      "returned": 50,
+      "total": 1751,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "acronym",
+      "query": "ATS",
+      "cap": 150,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 2131,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "acronym",
+      "query": "ATS",
+      "cap": 150,
+      "start": 100,
+      "limit": 50,
+      "returned": 50,
+      "total": 2131,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "acronym_context",
+      "query": "ATS action tracking",
+      "cap": 200,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 2380,
+      "warning": ""
+    },
+    {
+      "product": "ats",
+      "kind": "acronym_context",
+      "query": "ATS action tracking",
+      "cap": 200,
+      "start": 100,
+      "limit": 100,
+      "returned": 100,
+      "total": 2380,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "full",
+      "query": "\"Compliance Calendar\"",
+      "cap": 250,
+      "start": 0,
+      "limit": 100,
+      "returned": 90,
+      "total": 90,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "full",
+      "query": "Compliance Calendar",
+      "cap": 250,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 372,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "full",
+      "query": "Compliance Calendar",
+      "cap": 250,
+      "start": 100,
+      "limit": 100,
+      "returned": 100,
+      "total": 372,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "full",
+      "query": "Compliance Calendar",
+      "cap": 250,
+      "start": 200,
+      "limit": 50,
+      "returned": 50,
+      "total": 372,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "acronym",
+      "query": "CC",
+      "cap": 150,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 247,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "acronym",
+      "query": "CC",
+      "cap": 150,
+      "start": 100,
+      "limit": 50,
+      "returned": 50,
+      "total": 247,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "acronym_context",
+      "query": "CC compliance calendar",
+      "cap": 200,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 507,
+      "warning": ""
+    },
+    {
+      "product": "cc",
+      "kind": "acronym_context",
+      "query": "CC compliance calendar",
+      "cap": 200,
+      "start": 100,
+      "limit": 100,
+      "returned": 100,
+      "total": 507,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "full",
+      "query": "\"Audit Assistant\"",
+      "cap": 250,
+      "start": 0,
+      "limit": 100,
+      "returned": 16,
+      "total": 16,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "full",
+      "query": "Audit Assistant",
+      "cap": 250,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 345,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "full",
+      "query": "Audit Assistant",
+      "cap": 250,
+      "start": 100,
+      "limit": 100,
+      "returned": 100,
+      "total": 345,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "full",
+      "query": "Audit Assistant",
+      "cap": 250,
+      "start": 200,
+      "limit": 50,
+      "returned": 50,
+      "total": 345,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "acronym",
+      "query": "AA",
+      "cap": 150,
+      "start": 0,
+      "limit": 100,
+      "returned": 34,
+      "total": 34,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "acronym_context",
+      "query": "AA audit assistant",
+      "cap": 200,
+      "start": 0,
+      "limit": 100,
+      "returned": 100,
+      "total": 347,
+      "warning": ""
+    },
+    {
+      "product": "aa",
+      "kind": "acronym_context",
+      "query": "AA audit assistant",
+      "cap": 200,
+      "start": 100,
+      "limit": 100,
+      "returned": 100,
+      "total": 347,
+      "warning": ""
+    }
+  ],
+  "candidate_count": 773,
+  "exported_article_count": 593,
+  "exported_chunk_count": 1895,
+  "failed_get_content_count": 0,
+  "failed_get_content": [],
+  "files": {
+    "articles_jsonl": "articles.jsonl",
+    "chunks_jsonl": "chunks.jsonl",
+    "index_markdown": "index.md",
+    "corpus_markdown": "corpus.md"
+  },
+  "note": "Tokens and auth headers are intentionally excluded from this export."
+}

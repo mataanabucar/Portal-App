@@ -23,6 +23,85 @@ import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
+
+// ── TTS ───────────────────────────────────────────────────────────────────────
+
+const TTS_TONE_PRESETS = {
+  warmExecutive: {
+    voice: "cedar",
+    instructions:
+      "Speak in a calm, warm, confident, polished voice. Use a slightly lower, relaxed delivery with smooth pacing. Sound professional and composed, with subtle charm, but do not sound flirty, theatrical, exaggerated, or overly casual. Pause naturally between sections and make the content easy to follow.",
+  },
+  calmBriefing: {
+    voice: "marin",
+    instructions:
+      "Speak like a calm professional briefing. Clear, steady, composed, and easy to follow. Use smooth pacing and natural pauses. Avoid sounding robotic, rushed, dramatic, or overly enthusiastic.",
+  },
+  lateNightExecutive: {
+    voice: "cedar",
+    instructions:
+      "Speak with a low, relaxed, confident tone. Keep the delivery professional, calm, and subtly charismatic. Use slower pacing and smooth intonation. Do not sound seductive, flirty, or performative.",
+  },
+};
+
+const TTS_MAX_CHARS = 6000;
+const TTS_CACHE_MAX = 50;
+const VOICE_REPLAY_CONTEXT_MAX_CHARS = 14000;
+const VOICE_REPLAY_SCRIPT_MAX_CHARS = 4500;
+const ttsCache = new Map();
+
+function cleanTtsText(text) {
+  return text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[#*_`~[\]]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, TTS_MAX_CHARS);
+}
+
+function ttsSetCache(key, buffer) {
+  if (ttsCache.size >= TTS_CACHE_MAX) {
+    ttsCache.delete(ttsCache.keys().next().value);
+  }
+  ttsCache.set(key, buffer);
+}
+
+function buildVoiceReplayPrompt(reportText, cardJson) {
+  return [
+    "Rewrite the report below into a what i need to know, clear, friendly summary in a flirty \"you know me\" girlfriend tone.",
+    "",
+    "Tone rules:",
+    "",
+    "Call me Mataan by default.",
+    "Use babe only for light encouragement or reassurance.",
+    "Keep it sexy-friendly, playful, warm, and personal, but still work-appropriate.",
+    "Make it sound like a smart girlfriend helping me understand what matters.",
+    "Do not make it vulgar, explicit, cringey, or overly dramatic.",
+    "Keep the business details accurate.",
+    "Make the summary easy to scan.",
+    "Highlight what needs to happen next, why it matters, due date, risk, and key request details.",
+    "Use plain language a non-developer can understand.",
+    "Keep it concise but useful.",
+    "",
+    "Report below:",
+    reportText,
+    "",
+    "Full card JSON for context. Use this to preserve any details the report text missed:",
+    cardJson,
+  ].join("\n");
+}
+
+function normalizeVoiceReplayContext(value) {
+  return typeof value === "string"
+    ? value.replace(/\s+\n/g, "\n").trim().slice(0, VOICE_REPLAY_CONTEXT_MAX_CHARS)
+    : "";
+}
+
+function normalizeVoiceReplayScript(value) {
+  return typeof value === "string"
+    ? value.replace(/\s+\n/g, "\n").trim().slice(0, VOICE_REPLAY_SCRIPT_MAX_CHARS)
+    : "";
+}
 const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
@@ -390,6 +469,157 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       });
     } catch (error) {
       console.error("[/api/item/research]", error);
+      next(error);
+    }
+  });
+
+  app.post("/api/tts/card-replay", async (request, response, next) => {
+    try {
+      await respondWithRuntime(
+        {
+          config,
+          portalService,
+          summarizer,
+          parser,
+          asker,
+          teamGptAuthService,
+          testerConfig: normalizeTesterConfig(request.body?.testerConfig)
+        },
+        async ({ asker: runtimeAsker }) => {
+          const reportText = normalizeVoiceReplayContext(request.body?.reportText);
+          const item = request.body?.item && typeof request.body.item === "object"
+            ? request.body.item
+            : null;
+
+          if (!reportText && !item) {
+            response.status(400).json({ ok: false, error: "reportText or item is required." });
+            return;
+          }
+
+          const cardJson = item
+            ? JSON.stringify(item, null, 2).slice(0, VOICE_REPLAY_CONTEXT_MAX_CHARS)
+            : "{}";
+          const prompt = buildVoiceReplayPrompt(reportText || cardJson, cardJson);
+          const result = await runtimeAsker.ask(prompt, {
+            model: request.body?.model,
+            provider: request.body?.provider,
+            threadId: request.body?.threadId,
+            tone: "Warm + Playful + Work-Appropriate",
+            wordLimit: 650
+          });
+
+          if (result.enabled !== true) {
+            response.status(503).json({
+              ok: false,
+              error: result.reason || "Voice replay rewrite is unavailable.",
+              debug: result.debug
+            });
+            return;
+          }
+
+          const text = normalizeVoiceReplayScript(result.answer);
+          if (!text) {
+            response.status(502).json({ ok: false, error: "Voice replay rewrite returned empty text." });
+            return;
+          }
+
+          response.json({
+            ok: true,
+            text,
+            provider: result.provider,
+            model: result.model,
+            debug: result.debug
+          });
+        }
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/tts", async (request, response, next) => {
+    try {
+      const apiKey = config.openAiApiKey;
+      if (!apiKey) {
+        response.status(503).json({ ok: false, error: "OpenAI API key is not configured." });
+        return;
+      }
+
+      const {
+        text,
+        tonePreset = "warmExecutive",
+        format = "mp3",
+        voice: reqVoice,
+        instructions: reqInstructions,
+        speed: reqSpeed,
+      } = request.body || {};
+
+      if (!text || typeof text !== "string" || !text.trim()) {
+        response.status(400).json({ ok: false, error: "text is required." });
+        return;
+      }
+
+      const cleanText = cleanTtsText(text);
+      if (!cleanText) {
+        response.status(400).json({ ok: false, error: "text is empty after cleaning." });
+        return;
+      }
+
+      const preset = TTS_TONE_PRESETS[tonePreset] ?? TTS_TONE_PRESETS.warmExecutive;
+      const finalVoice = (typeof reqVoice === "string" && reqVoice.trim()) ? reqVoice.trim() : preset.voice;
+      const finalInstructions = (typeof reqInstructions === "string" && reqInstructions.trim()) ? reqInstructions.trim() : preset.instructions;
+      const finalSpeed = (typeof reqSpeed === "number" && reqSpeed >= 0.25 && reqSpeed <= 4.0) ? reqSpeed : null;
+
+      const MIME = { mp3: "audio/mpeg", opus: "audio/opus", aac: "audio/aac", flac: "audio/flac", wav: "audio/wav", pcm: "audio/pcm" };
+      const contentType = MIME[format] ?? "audio/mpeg";
+
+      const instrKey = finalInstructions.length > 80 ? finalInstructions.slice(0, 80) : finalInstructions;
+      const cacheKey = `${finalVoice}:${format}:${finalSpeed ?? ""}:${instrKey}:${cleanText}`;
+
+      if (ttsCache.has(cacheKey)) {
+        response.setHeader("Content-Type", contentType);
+        response.setHeader("Cache-Control", "private, max-age=3600");
+        response.send(ttsCache.get(cacheKey));
+        return;
+      }
+
+      const openaiBody = {
+        model: "gpt-4o-mini-tts",
+        voice: finalVoice,
+        input: cleanText,
+        instructions: finalInstructions,
+        response_format: format,
+      };
+      if (finalSpeed !== null) openaiBody.speed = finalSpeed;
+
+      const openaiRes = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(openaiBody),
+      });
+
+      if (!openaiRes.ok) {
+        const errText = await openaiRes.text().catch(() => "");
+        console.error("[/api/tts] OpenAI error:", openaiRes.status, errText);
+        let detail = "Audio generation failed.";
+        try {
+          const parsed = JSON.parse(errText);
+          if (parsed?.error?.message) detail = parsed.error.message;
+        } catch {}
+        response.status(502).json({ ok: false, error: detail });
+        return;
+      }
+
+      const buffer = Buffer.from(await openaiRes.arrayBuffer());
+      ttsSetCache(cacheKey, buffer);
+
+      response.setHeader("Content-Type", contentType);
+      response.setHeader("Cache-Control", "private, max-age=3600");
+      response.send(buffer);
+    } catch (error) {
       next(error);
     }
   });

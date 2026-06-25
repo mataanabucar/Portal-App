@@ -6,7 +6,11 @@ REM ---------------------------------------------------------------
 
 setlocal enabledelayedexpansion
 
-cd /d "%~dp0"
+set "SCRIPT_DIR=%~dp0"
+pushd "%SCRIPT_DIR%" || (
+  echo Failed to change to script directory: "%SCRIPT_DIR%"
+  exit /b 1
+)
 
 set PORTS=3000 3011
 
@@ -24,4 +28,5 @@ echo.
 
 call npm run dev
 
+popd
 endlocal

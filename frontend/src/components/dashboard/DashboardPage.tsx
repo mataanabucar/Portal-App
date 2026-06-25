@@ -7,6 +7,8 @@ import { SelectMenu } from "@/components/ui/select-menu";
 import { AppSidebar } from "@/components/layout/AppSidebar";
 import { AISummaryCard } from "@/components/ai-summary/AISummaryCard";
 import { QuickReadModal } from "@/components/quick-read/QuickReadModal";
+import { TtsConfigModal } from "@/components/tts/TtsConfigModal";
+import { ResearchTestModal } from "@/components/research/ResearchTestModal";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
 import { orderByPriority } from "@/lib/priority";
 import { readLocal, subscribeLocal, writeLocal } from "@/lib/storage";
@@ -34,7 +36,10 @@ type SummaryTone = (typeof SUMMARY_TONE_OPTIONS)[number];
 export function DashboardPage() {
   const summaryTone = useStoredSummaryTone();
   const [quickReadOpen, setQuickReadOpen] = useState(false);
+  const [ttsConfigOpen, setTtsConfigOpen] = useState(false);
+  const [researchTestOpen, setResearchTestOpen] = useState(false);
   const {
+    data,
     items,
     error,
     isLoading,
@@ -49,6 +54,9 @@ export function DashboardPage() {
     includeSummary: true,
     summaryTone,
   });
+
+  // Only show the TeamGPT tone selector when the summarizer is using TeamGPT.
+  const isTeamGptSummarizer = data?.summary?.provider === "teamgpt";
 
   // Cards are shown ordered by priority too, so the grid and Quick Read agree.
   const orderedItems = orderByPriority(items);
@@ -76,6 +84,8 @@ export function DashboardPage() {
       <AppSidebar
         onQuickRead={() => setQuickReadOpen(true)}
         quickReadActive={quickReadOpen}
+        onTtsConfig={() => setTtsConfigOpen(true)}
+        onResearchTest={() => setResearchTestOpen(true)}
       />
 
       <main className="flex-1 min-w-0 px-5 py-8 space-y-6">
@@ -87,17 +97,19 @@ export function DashboardPage() {
             <p className="text-sm text-slate-400 mt-1">{statusLine}</p>
           </div>
           <div className="flex items-center gap-2">
-            <SelectMenu
-              label="TeamGPT tone"
-              value={summaryTone}
-              options={SUMMARY_TONE_OPTIONS.map((tone) => ({
-                value: tone,
-                label: tone,
-              }))}
-              onValueChange={handleSummaryToneChange}
-              helperText="This changes the voice used when the queue brief and item summaries are regenerated."
-              disabled={isLoading}
-            />
+            {isTeamGptSummarizer && (
+              <SelectMenu
+                label="TeamGPT tone"
+                value={summaryTone}
+                options={SUMMARY_TONE_OPTIONS.map((tone) => ({
+                  value: tone,
+                  label: tone,
+                }))}
+                onValueChange={handleSummaryToneChange}
+                helperText="This changes the voice used when the queue brief and item summaries are regenerated."
+                disabled={isLoading}
+              />
+            )}
             <Button
               variant="outline"
               onClick={() => setQuickReadOpen(true)}
@@ -168,6 +180,16 @@ export function DashboardPage() {
         open={quickReadOpen}
         onClose={() => setQuickReadOpen(false)}
         items={items}
+      />
+
+      <TtsConfigModal
+        open={ttsConfigOpen}
+        onClose={() => setTtsConfigOpen(false)}
+      />
+
+      <ResearchTestModal
+        open={researchTestOpen}
+        onClose={() => setResearchTestOpen(false)}
       />
     </div>
   );
