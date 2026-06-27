@@ -16,6 +16,7 @@ export interface TtsConfig {
   playbackRate: number;
   responseFormat: TtsResponseFormat;
   testScript: string;
+  volume: number;
 }
 
 const TTS_CONFIG_KEY = "tts-config";
@@ -27,6 +28,7 @@ export const DEFAULT_TTS_CONFIG: TtsConfig = {
   speed: 1.0,
   playbackRate: 0.95,
   responseFormat: "mp3",
+  volume: 1.0,
   testScript:
     "Good morning. Here is a quick summary of your portal queue for today. All items appear to be on track. Please review the following priorities and take action where needed.",
 };

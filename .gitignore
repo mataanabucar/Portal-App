@@ -20,3 +20,22 @@ notes/powershellTextWorking.txt
 coverage/
 npm-debug.log*
 dist/
+
+
+# local cleanup/archive output
+cleanup-archive/
+
+# non-runtime scratch and generated artifacts
+notes/
+.agents/
+portal-home-*.png
+src/graph-tester2_vue.zip
+docs/.embeddings-cache.json
+
+# archived Electron desktop shell
+src/desktop/
+scripts/launch-desktop-shell.js
+scripts/build-shareable-bundle.js
+Launch Portal Visualizer.cmd
+Build Portal Visualizer EXE.cmd
+Build Shareable Portal Visualizer ZIP.cmd

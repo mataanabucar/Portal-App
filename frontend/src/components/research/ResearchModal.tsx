@@ -254,6 +254,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
         speed: cfg.speed,
         playbackRate: cfg.playbackRate,
         format: cfg.responseFormat,
+        volume: cfg.volume,
         onStateChange: (state) => {
           setTtsState(state);
           if (state === "idle") setTtsActiveKey(null);

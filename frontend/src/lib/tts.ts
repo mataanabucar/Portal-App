@@ -55,6 +55,7 @@ export async function playPortalTts({
   speed,
   playbackRate = 0.95,
   format = "mp3",
+  volume = 1.0,
   onStateChange,
   onError,
 }: {
@@ -65,6 +66,7 @@ export async function playPortalTts({
   speed?: number;
   playbackRate?: number;
   format?: string;
+  volume?: number;
   onStateChange?: (state: TtsState) => void;
   onError?: (message: string) => void;
 }): Promise<void> {
@@ -86,6 +88,7 @@ export async function playPortalTts({
         instructions,
         speed,
         format,
+        volume,
       }),
       signal: abortController.signal,
     });

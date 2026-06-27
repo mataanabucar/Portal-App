@@ -76,6 +76,7 @@ export function TtsConfigModal({ open, onClose }: TtsConfigModalProps) {
       speed: cfg.speed,
       playbackRate: cfg.playbackRate,
       format: cfg.responseFormat,
+      volume: cfg.volume,
       onStateChange: setTtsState,
       onError: (msg) => {
         setTtsError(msg);
@@ -195,6 +196,24 @@ export function TtsConfigModal({ open, onClose }: TtsConfigModalProps) {
               </select>
             </Field>
           </div>
+
+          {/* Volume */}
+          <Field label={`Volume — ${cfg.volume.toFixed(2)}×`}>
+            <input
+              type="range"
+              min={0.1}
+              max={2.0}
+              step={0.05}
+              value={cfg.volume}
+              onChange={(e) => setCfg((p) => ({ ...p, volume: Number(e.target.value) }))}
+              className="w-full accent-teal-500"
+            />
+            <div className="flex justify-between text-[0.6rem] text-slate-600 mt-0.5">
+              <span>0.1× quiet</span>
+              <span>1.0× normal</span>
+              <span>2.0× loud</span>
+            </div>
+          </Field>
 
           {/* Test script */}
           <Field label="Test Script">

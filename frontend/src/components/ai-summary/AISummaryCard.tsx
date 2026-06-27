@@ -113,6 +113,7 @@ export function AISummaryCard({
         speed: cfg.speed,
         playbackRate: cfg.playbackRate,
         format: cfg.responseFormat,
+        volume: cfg.volume,
         onStateChange: setTtsState,
         onError: (msg) => {
           setTtsError(msg);

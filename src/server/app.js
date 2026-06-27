@@ -1,5 +1,10 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { writeFileSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { buildConfig } from "./config/env.js";
 import {
   createAskService,
@@ -43,6 +48,31 @@ const TTS_TONE_PRESETS = {
       "Speak with a low, relaxed, confident tone. Keep the delivery professional, calm, and subtly charismatic. Use slower pacing and smooth intonation. Do not sound seductive, flirty, or performative.",
   },
 };
+
+const TTS_FORMAT_EXT = { mp3: "mp3", wav: "wav", flac: "flac", aac: "aac", opus: "ogg" };
+
+async function applyLoudnorm(inputBuffer, format = "mp3", volume = 1.0) {
+  const ext = TTS_FORMAT_EXT[format];
+  if (!ext) return inputBuffer; // pcm / unknown — skip
+  const id = randomBytes(8).toString("hex");
+  const tmpIn = join(tmpdir(), `tts_in_${id}.${ext}`);
+  const tmpOut = join(tmpdir(), `tts_out_${id}.${ext}`);
+  const volFilter = volume !== 1.0 ? `,volume=${volume}` : "";
+  try {
+    writeFileSync(tmpIn, inputBuffer);
+    await new Promise((resolve, reject) => {
+      execFile("ffmpeg", [
+        "-i", tmpIn,
+        "-filter:a", `loudnorm=I=-16:TP=-1.5:LRA=11${volFilter}`,
+        "-y", tmpOut,
+      ], (err) => (err ? reject(err) : resolve()));
+    });
+    return readFileSync(tmpOut);
+  } finally {
+    try { rmSync(tmpIn, { force: true }); } catch {}
+    try { rmSync(tmpOut, { force: true }); } catch {}
+  }
+}
 
 const TTS_MAX_CHARS = 6000;
 const TTS_CACHE_MAX = 50;
@@ -552,6 +582,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         voice: reqVoice,
         instructions: reqInstructions,
         speed: reqSpeed,
+        volume: reqVolume,
       } = request.body || {};
 
       if (!text || typeof text !== "string" || !text.trim()) {
@@ -569,12 +600,13 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const finalVoice = (typeof reqVoice === "string" && reqVoice.trim()) ? reqVoice.trim() : preset.voice;
       const finalInstructions = (typeof reqInstructions === "string" && reqInstructions.trim()) ? reqInstructions.trim() : preset.instructions;
       const finalSpeed = (typeof reqSpeed === "number" && reqSpeed >= 0.25 && reqSpeed <= 4.0) ? reqSpeed : null;
+      const finalVolume = (typeof reqVolume === "number" && reqVolume >= 0.1 && reqVolume <= 3.0) ? reqVolume : 1.0;
 
       const MIME = { mp3: "audio/mpeg", opus: "audio/opus", aac: "audio/aac", flac: "audio/flac", wav: "audio/wav", pcm: "audio/pcm" };
       const contentType = MIME[format] ?? "audio/mpeg";
 
       const instrKey = finalInstructions.length > 80 ? finalInstructions.slice(0, 80) : finalInstructions;
-      const cacheKey = `${finalVoice}:${format}:${finalSpeed ?? ""}:${instrKey}:${cleanText}`;
+      const cacheKey = `${finalVoice}:${format}:${finalSpeed ?? ""}:${finalVolume}:${instrKey}:${cleanText}`;
 
       if (ttsCache.has(cacheKey)) {
         response.setHeader("Content-Type", contentType);
@@ -584,7 +616,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       }
 
       const openaiBody = {
-        model: "gpt-4o-mini-tts",
+        //model: "gpt-4o-mini-tts",
+        model: "gpt-4o-mini-tts-2025-03-20",
         voice: finalVoice,
         input: cleanText,
         instructions: finalInstructions,
@@ -613,7 +646,11 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         return;
       }
 
-      const buffer = Buffer.from(await openaiRes.arrayBuffer());
+      const rawBuffer = Buffer.from(await openaiRes.arrayBuffer());
+      const buffer = await applyLoudnorm(rawBuffer, format, finalVolume).catch((err) => {
+        console.warn("[/api/tts] loudnorm failed, using raw audio:", err.message);
+        return rawBuffer;
+      });
       ttsSetCache(cacheKey, buffer);
 
       response.setHeader("Content-Type", contentType);
