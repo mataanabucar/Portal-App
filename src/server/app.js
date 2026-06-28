@@ -1,7 +1,7 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
-import { writeFileSync, readFileSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -72,6 +72,235 @@ async function applyLoudnorm(inputBuffer, format = "mp3", volume = 1.0) {
     try { rmSync(tmpIn, { force: true }); } catch {}
     try { rmSync(tmpOut, { force: true }); } catch {}
   }
+}
+
+// Whitelist of characters allowed in a client-supplied FFmpeg filter chain.
+// execFile passes the chain as a single argv entry (no shell), so this is a
+// belt-and-suspenders guard against malformed/abusive input rather than shell
+// injection (which is already not possible). Backslash/quote/brackets are
+// permitted for filters that take file paths (arnndn, ladspa).
+const FFMPEG_CHAIN_RE = /^[a-zA-Z0-9=:,.|*/+\-_ ()'@\\\[\]]+$/;
+const FFMPEG_CHAIN_MAX = 2000;
+
+function isSafeFfmpegChain(chain) {
+  return (
+    typeof chain === "string" &&
+    chain.trim().length > 0 &&
+    chain.length <= FFMPEG_CHAIN_MAX &&
+    FFMPEG_CHAIN_RE.test(chain)
+  );
+}
+
+// Apply an arbitrary (validated) FFmpeg "-af" filter chain. The client-built
+// chain already includes loudnorm/limiter/volume, so we run it verbatim.
+async function applyFfmpegChain(inputBuffer, format, chain) {
+  const ext = TTS_FORMAT_EXT[format];
+  if (!ext) return inputBuffer; // pcm / unknown — skip
+  const id = randomBytes(8).toString("hex");
+  const tmpIn = join(tmpdir(), `tts_fx_in_${id}.${ext}`);
+  const tmpOut = join(tmpdir(), `tts_fx_out_${id}.${ext}`);
+  try {
+    writeFileSync(tmpIn, inputBuffer);
+    await new Promise((resolve, reject) => {
+      execFile("ffmpeg", ["-i", tmpIn, "-filter:a", chain, "-y", tmpOut], (err) =>
+        err ? reject(err) : resolve()
+      );
+    });
+    return readFileSync(tmpOut);
+  } finally {
+    try { rmSync(tmpIn, { force: true }); } catch {}
+    try { rmSync(tmpOut, { force: true }); } catch {}
+  }
+}
+
+// ── VST insert via MrsWatson (offline VST2 host) ────────────────────────────
+// Pipeline: OpenAI audio → FFmpeg pre (-af) to WAV → MrsWatson(VST) → FFmpeg
+// finalize (-af: limiter/loudnorm/volume) → target format.
+
+function execFileAsync(file, args) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { maxBuffer: 1024 * 1024 * 64 }, (err, stdout, stderr) =>
+      err ? reject(new Error((stderr && stderr.toString().trim()) || err.message)) : resolve()
+    );
+  });
+}
+
+// Decode arbitrary input → 48k stereo WAV, optionally applying a pre `-af` chain.
+async function ffmpegDecodeToWav(inputBuffer, inExt, preChain) {
+  const id = randomBytes(8).toString("hex");
+  const tmpIn = join(tmpdir(), `vst_pre_in_${id}.${inExt || "mp3"}`);
+  const tmpOut = join(tmpdir(), `vst_pre_out_${id}.wav`);
+  const args = ["-i", tmpIn];
+  if (preChain) args.push("-filter:a", preChain);
+  args.push("-ar", "48000", "-ac", "2", "-y", tmpOut);
+  try {
+    writeFileSync(tmpIn, inputBuffer);
+    await execFileAsync("ffmpeg", args);
+    return readFileSync(tmpOut);
+  } finally {
+    try { rmSync(tmpIn, { force: true }); } catch {}
+    try { rmSync(tmpOut, { force: true }); } catch {}
+  }
+}
+
+// Encode WAV → target format, optionally applying a finalize `-af` chain.
+async function ffmpegEncodeFromWav(wavBuffer, format, finalizeChain) {
+  const ext = TTS_FORMAT_EXT[format] || "wav";
+  const id = randomBytes(8).toString("hex");
+  const tmpIn = join(tmpdir(), `vst_post_in_${id}.wav`);
+  const tmpOut = join(tmpdir(), `vst_post_out_${id}.${ext}`);
+  const args = ["-i", tmpIn];
+  if (finalizeChain) args.push("-filter:a", finalizeChain);
+  args.push("-y", tmpOut);
+  try {
+    writeFileSync(tmpIn, wavBuffer);
+    await execFileAsync("ffmpeg", args);
+    return readFileSync(tmpOut);
+  } finally {
+    try { rmSync(tmpIn, { force: true }); } catch {}
+    try { rmSync(tmpOut, { force: true }); } catch {}
+  }
+}
+
+// Split a plugin reference into MrsWatson's { name, root }. A full .dll path is
+// split into a search root + bare name; a bare name is used as-is.
+function parseVstPlugin(ref) {
+  const norm = String(ref).trim().replace(/\\/g, "/");
+  if (norm.includes("/")) {
+    const idx = norm.lastIndexOf("/");
+    return { root: norm.slice(0, idx), name: norm.slice(idx + 1).replace(/\.(dll|vst|so)$/i, "") };
+  }
+  return { root: null, name: norm.replace(/\.(dll|vst|so)$/i, "") };
+}
+
+// "0,0.5;1,0.3" → ["--parameter","0,0.5","--parameter","1,0.3"]
+function parseVstParams(spec) {
+  if (!spec || typeof spec !== "string") return [];
+  return spec
+    .split(/[;|]/)
+    .map((s) => s.trim())
+    .filter((s) => /^\d+\s*,\s*-?\d*\.?\d+$/.test(s))
+    .flatMap((s) => ["--parameter", s.replace(/\s+/g, "")]);
+}
+
+async function applyMrsWatson(wavBuffer, { hostPath, plugin, params }) {
+  const host = (hostPath && String(hostPath).trim()) || "mrswatson64";
+  // If a path-like host is given, fail fast with a clear message when missing.
+  if (/[\\/]/.test(host) && !existsSync(host)) {
+    throw new Error(`MrsWatson host not found at "${host}".`);
+  }
+  const { root, name } = parseVstPlugin(plugin);
+  const id = randomBytes(8).toString("hex");
+  const tmpIn = join(tmpdir(), `vst_in_${id}.wav`);
+  const tmpOut = join(tmpdir(), `vst_out_${id}.wav`);
+  const args = ["--plugin", name, "--input", tmpIn, "--output", tmpOut];
+  if (root) args.push("--plugin-root", root);
+  args.push(...parseVstParams(params));
+  try {
+    writeFileSync(tmpIn, wavBuffer);
+    await execFileAsync(host, args).catch((err) => {
+      if (err.code === "ENOENT" || /ENOENT/.test(err.message)) {
+        throw new Error(`MrsWatson host "${host}" is not installed or not on PATH.`);
+      }
+      throw err;
+    });
+    if (!existsSync(tmpOut)) throw new Error("MrsWatson produced no output (check plugin path/format).");
+    return readFileSync(tmpOut);
+  } finally {
+    try { rmSync(tmpIn, { force: true }); } catch {}
+    try { rmSync(tmpOut, { force: true }); } catch {}
+  }
+}
+
+// ── LADSPA control introspection ────────────────────────────────────────────
+// Enumerate a LADSPA plugin's real input controls (names/ranges/defaults) by
+// instantiating it in FFmpeg with a deliberately-invalid control, which makes
+// af_ladspa print the valid control list to stderr.
+
+function escFilterValue(v) {
+  return "'" + String(v).replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'") + "'";
+}
+
+// FFmpeg (af_ladspa) prints lines like:
+//   [Parsed_ladspa_0 @ 0x..] c0: Decay [ms] [<float>, min: 0.0, max: 10000.0 (default 2500.0)]
+//   [Parsed_ladspa_0 @ 0x..] c3: Comb Filters [toggled (1 or 0) (default 1.0)]
+//   [Parsed_ladspa_0 @ 0x..] c7: Reverb Type [<int>, min: 0.0, max: 42.0 (default 0.0)]
+// Note the port name itself may contain brackets, so we locate the hint bracket
+// (the one containing a type token) rather than the first bracket on the line.
+function parseLadspaControls(stderr) {
+  const out = [];
+  const seen = new Set();
+  const hintRe = /\[([^\]]*(?:<float>|<int>|toggled)[^\]]*)\]/;
+  const toNum = (s) => {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+  for (const line of stderr.split(/\r?\n/)) {
+    const cm = /c(\d+):\s*(.*)$/.exec(line);
+    if (!cm) continue;
+    const index = Number(cm[1]);
+    if (seen.has(index)) continue;
+    const rest = cm[2];
+    const hm = hintRe.exec(rest);
+    if (!hm) continue;
+    seen.add(index);
+    const body = hm[1];
+    const toggled = /toggled/i.test(body);
+    const minM = /min:\s*(-?[\d.eE+]+)/i.exec(body);
+    const maxM = /max:\s*(-?[\d.eE+]+)/i.exec(body);
+    const defM = /default\s+(-?[\d.eE+]+)/i.exec(body);
+    out.push({
+      index,
+      name: rest.slice(0, hm.index).trim(),
+      min: toggled ? 0 : minM ? toNum(minM[1]) : null,
+      max: toggled ? 1 : maxM ? toNum(maxM[1]) : null,
+      default: defM ? toNum(defM[1]) ?? 0 : 0,
+      toggled,
+      integer: /<int>/i.test(body),
+      logarithmic: /logarithmic/i.test(body),
+    });
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
+
+async function introspectLadspa(file, plugin) {
+  // Instantiate the plugin with no controls; af_ladspa lists its controls.
+  const filter = `ladspa=f=${escFilterValue(file)}:p=${escFilterValue(plugin)}`;
+  const args = [
+    "-hide_banner", "-v", "verbose",
+    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "0.1",
+    "-af", filter, "-f", "null", "-",
+  ];
+  const stderr = await new Promise((resolve) => {
+    execFile("ffmpeg", args, { maxBuffer: 1024 * 1024 * 8 }, (_err, _stdout, serr) =>
+      resolve(serr ? String(serr) : "")
+    );
+  });
+  const controls = parseLadspaControls(stderr);
+  if (controls.length === 0) {
+    const failed = /Failed to load '([^']+)'/.exec(stderr);
+    if (failed) {
+      throw new Error(
+        `Failed to load '${failed[1]}'. Check: (1) the .dll is on LADSPA_PATH or give a full path, ` +
+          `and (2) it's a 64-bit DLL — this FFmpeg is x86-64 and cannot load 32-bit LADSPA plugins.`
+      );
+    }
+    throw new Error("No controls found — check the library/plugin names and that LADSPA_PATH is set.");
+  }
+  return controls;
+}
+
+function isValidVstRequest(vst) {
+  return (
+    vst &&
+    typeof vst === "object" &&
+    typeof vst.plugin === "string" &&
+    vst.plugin.trim().length > 0 &&
+    vst.plugin.length < 1024 &&
+    !/[\r\n\0]/.test(vst.plugin) &&
+    (vst.params == null || (typeof vst.params === "string" && vst.params.length < 1024)) &&
+    (vst.hostPath == null || (typeof vst.hostPath === "string" && vst.hostPath.length < 1024))
+  );
 }
 
 const TTS_MAX_CHARS = 6000;
@@ -583,6 +812,9 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         instructions: reqInstructions,
         speed: reqSpeed,
         volume: reqVolume,
+        afChain: reqAfChain,
+        finalizeChain: reqFinalizeChain,
+        vst: reqVst,
       } = request.body || {};
 
       if (!text || typeof text !== "string" || !text.trim()) {
@@ -601,12 +833,17 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const finalInstructions = (typeof reqInstructions === "string" && reqInstructions.trim()) ? reqInstructions.trim() : preset.instructions;
       const finalSpeed = (typeof reqSpeed === "number" && reqSpeed >= 0.25 && reqSpeed <= 4.0) ? reqSpeed : null;
       const finalVolume = (typeof reqVolume === "number" && reqVolume >= 0.1 && reqVolume <= 3.0) ? reqVolume : 1.0;
+      const finalAfChain = isSafeFfmpegChain(reqAfChain) ? reqAfChain.trim() : null;
+      const finalizeChain = isSafeFfmpegChain(reqFinalizeChain) ? reqFinalizeChain.trim() : null;
+      const finalVst = isValidVstRequest(reqVst) ? reqVst : null;
 
       const MIME = { mp3: "audio/mpeg", opus: "audio/opus", aac: "audio/aac", flac: "audio/flac", wav: "audio/wav", pcm: "audio/pcm" };
       const contentType = MIME[format] ?? "audio/mpeg";
 
       const instrKey = finalInstructions.length > 80 ? finalInstructions.slice(0, 80) : finalInstructions;
-      const cacheKey = `${finalVoice}:${format}:${finalSpeed ?? ""}:${finalVolume}:${instrKey}:${cleanText}`;
+      const chainKey = finalAfChain ? finalAfChain.slice(0, 120) : "";
+      const vstKey = finalVst ? `${finalVst.plugin}:${finalVst.params ?? ""}` : "";
+      const cacheKey = `${finalVoice}:${format}:${finalSpeed ?? ""}:${finalVolume}:${chainKey}:${vstKey}:${instrKey}:${cleanText}`;
 
       if (ttsCache.has(cacheKey)) {
         response.setHeader("Content-Type", contentType);
@@ -647,10 +884,43 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       }
 
       const rawBuffer = Buffer.from(await openaiRes.arrayBuffer());
-      const buffer = await applyLoudnorm(rawBuffer, format, finalVolume).catch((err) => {
-        console.warn("[/api/tts] loudnorm failed, using raw audio:", err.message);
-        return rawBuffer;
-      });
+
+      // VST insert pipeline: FFmpeg pre → MrsWatson → FFmpeg finalize. Failures
+      // here are surfaced (so setup issues are visible) rather than silently
+      // falling back, since the user explicitly asked for the plugin.
+      if (finalVst) {
+        try {
+          const inExt = TTS_FORMAT_EXT[format] || "mp3";
+          const wavIn = await ffmpegDecodeToWav(rawBuffer, inExt, finalAfChain);
+          const wavVst = await applyMrsWatson(wavIn, {
+            hostPath: finalVst.hostPath,
+            plugin: finalVst.plugin,
+            params: finalVst.params,
+          });
+          const out = await ffmpegEncodeFromWav(wavVst, format, finalizeChain);
+          ttsSetCache(cacheKey, out);
+          response.setHeader("Content-Type", contentType);
+          response.setHeader("Cache-Control", "private, max-age=3600");
+          response.send(out);
+        } catch (err) {
+          console.error("[/api/tts] VST pipeline failed:", err.message);
+          response.status(502).json({ ok: false, error: `VST processing failed: ${err.message}` });
+        }
+        return;
+      }
+
+      // When a custom FX chain is supplied, it already includes loudnorm/limiter/
+      // volume, so we run it instead of the default loudnorm pass. Either path
+      // falls back to the raw OpenAI audio if FFmpeg fails.
+      const buffer = finalAfChain
+        ? await applyFfmpegChain(rawBuffer, format, finalAfChain).catch((err) => {
+            console.warn("[/api/tts] ffmpeg chain failed, using raw audio:", err.message);
+            return rawBuffer;
+          })
+        : await applyLoudnorm(rawBuffer, format, finalVolume).catch((err) => {
+            console.warn("[/api/tts] loudnorm failed, using raw audio:", err.message);
+            return rawBuffer;
+          });
       ttsSetCache(cacheKey, buffer);
 
       response.setHeader("Content-Type", contentType);
@@ -658,6 +928,26 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       response.send(buffer);
     } catch (error) {
       next(error);
+    }
+  });
+
+  app.post("/api/ladspa/controls", async (request, response) => {
+    try {
+      const { file, plugin } = request.body || {};
+      const okStr = (v, max) => typeof v === "string" && v.length <= max && !/[\r\n\0]/.test(v);
+      if (!okStr(plugin, 512) || !plugin.trim()) {
+        response.status(400).json({ ok: false, error: "plugin is required." });
+        return;
+      }
+      if (file != null && !okStr(file, 512)) {
+        response.status(400).json({ ok: false, error: "invalid file." });
+        return;
+      }
+      const lib = (file && file.trim()) || plugin.trim();
+      const controls = await introspectLadspa(lib, plugin.trim());
+      response.json({ ok: true, plugin: plugin.trim(), controls });
+    } catch (error) {
+      response.status(502).json({ ok: false, error: error.message });
     }
   });
 

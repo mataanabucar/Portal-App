@@ -56,6 +56,9 @@ export async function playPortalTts({
   playbackRate = 0.95,
   format = "mp3",
   volume = 1.0,
+  afChain,
+  finalizeChain,
+  vst,
   onStateChange,
   onError,
 }: {
@@ -67,6 +70,12 @@ export async function playPortalTts({
   playbackRate?: number;
   format?: string;
   volume?: number;
+  /** Optional FFmpeg "-af" chain for server-side post-processing (pre-VST stage). */
+  afChain?: string;
+  /** Finalize chain (limiter/loudnorm/volume) applied after the VST insert. */
+  finalizeChain?: string;
+  /** Optional VST insert handled by the MrsWatson host on the server. */
+  vst?: { plugin: string; params?: string; hostPath?: string };
   onStateChange?: (state: TtsState) => void;
   onError?: (message: string) => void;
 }): Promise<void> {
@@ -89,6 +98,9 @@ export async function playPortalTts({
         speed,
         format,
         volume,
+        afChain: afChain && afChain.trim() ? afChain.trim() : undefined,
+        finalizeChain: finalizeChain && finalizeChain.trim() ? finalizeChain.trim() : undefined,
+        vst: vst && vst.plugin && vst.plugin.trim() ? vst : undefined,
       }),
       signal: abortController.signal,
     });
