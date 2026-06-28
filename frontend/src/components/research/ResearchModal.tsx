@@ -36,7 +36,7 @@ import {
   playPortalTts,
   stopPortalTts,
 } from "@/lib/tts";
-import { readTtsConfig } from "@/lib/ttsConfig";
+import { readTtsConfig, buildAfChain } from "@/lib/ttsConfig";
 import {
   buildQuickTakeTtsText,
   buildOverviewTtsText,
@@ -255,6 +255,7 @@ export function ResearchModal({ open, onClose, item }: ResearchModalProps) {
         playbackRate: cfg.playbackRate,
         format: cfg.responseFormat,
         volume: cfg.volume,
+        afChain: buildAfChain(cfg),
         onStateChange: (state) => {
           setTtsState(state);
           if (state === "idle") setTtsActiveKey(null);

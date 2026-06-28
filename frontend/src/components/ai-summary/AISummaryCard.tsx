@@ -32,7 +32,7 @@ import {
   playPortalTts,
   stopPortalTts,
 } from "@/lib/tts";
-import { readTtsConfig } from "@/lib/ttsConfig";
+import { readTtsConfig, buildAfChain } from "@/lib/ttsConfig";
 import { buildQueueItemVoiceReplayReport } from "@/lib/ttsBuildText";
 import type {
   ConfidenceLevel,
@@ -114,6 +114,7 @@ export function AISummaryCard({
         playbackRate: cfg.playbackRate,
         format: cfg.responseFormat,
         volume: cfg.volume,
+        afChain: buildAfChain(cfg),
         onStateChange: setTtsState,
         onError: (msg) => {
           setTtsError(msg);

@@ -1014,6 +1014,31 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
     }
   });
 
+  // ── User preset persistence (file-backed, survives browser clears) ──────────
+  const userPresetsFile = fileURLToPath(new URL("../../user-data/tts-presets.json", import.meta.url));
+
+  app.get("/api/tts/presets", (_request, response) => {
+    try {
+      if (!existsSync(userPresetsFile)) { response.json([]); return; }
+      const raw = readFileSync(userPresetsFile, "utf8");
+      const parsed = JSON.parse(raw);
+      response.json(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      response.json([]);
+    }
+  });
+
+  app.post("/api/tts/presets", (request, response) => {
+    try {
+      const presets = request.body;
+      if (!Array.isArray(presets)) { response.status(400).json({ ok: false, error: "Body must be an array." }); return; }
+      writeFileSync(userPresetsFile, JSON.stringify(presets, null, 2), "utf8");
+      response.json({ ok: true });
+    } catch (err) {
+      response.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   app.post("/api/ladspa/controls", async (request, response) => {
     try {
       const { file, plugin } = request.body || {};

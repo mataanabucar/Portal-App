@@ -25,6 +25,9 @@ dist/
 # local cleanup/archive output
 cleanup-archive/
 
+# machine-local user data (TTS presets etc.) — persists on disk, not in git
+user-data/*.json
+
 # non-runtime scratch and generated artifacts
 notes/
 .agents/

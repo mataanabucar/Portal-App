@@ -1,6 +1,6 @@
 import { readLocal, writeLocal } from "./storage";
 import { TTS_TONE_PRESETS, type TonePresetKey } from "./tts";
-import { DEFAULT_FX, type VoiceFx } from "./voiceFx";
+import { DEFAULT_FX, type VoiceFx, buildFfmpegChain } from "./voiceFx";
 
 export type TtsResponseFormat = "mp3" | "opus" | "aac" | "flac" | "wav" | "pcm";
 
@@ -61,4 +61,14 @@ export function readTtsConfig(): TtsConfig {
 
 export function writeTtsConfig(config: TtsConfig): void {
   writeLocal(TTS_CONFIG_KEY, config);
+}
+
+/**
+ * Build the afChain string for playPortalTts from a saved config.
+ * Returns undefined when Apply FFmpeg is off so the server skips post-processing.
+ */
+export function buildAfChain(cfg: TtsConfig): string | undefined {
+  if (!cfg.applyFfmpeg) return undefined;
+  const chain = buildFfmpegChain(cfg.fx, { volume: cfg.volume, allowRubberband: cfg.useRubberband });
+  return chain || undefined;
 }

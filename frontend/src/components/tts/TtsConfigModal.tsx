@@ -26,8 +26,8 @@ import {
   buildFfmpegChain,
   buildFinalizeChain,
   buildOutputSummary,
-  readUserPresets,
-  writeUserPresets,
+  fetchUserPresets,
+  saveUserPresets,
   readFavorites,
   writeFavorites,
   type VoiceFx,
@@ -99,7 +99,7 @@ function Panel({ onClose }: { onClose: () => void }) {
   const [savedSnapshot, setSavedSnapshot] = useState<TtsConfig>(readTtsConfig);
   const [ttsState, setTtsState] = useState<TtsState>("idle");
   const [ttsError, setTtsError] = useState<string | null>(null);
-  const [userPresets, setUserPresets] = useState<VoiceFxPreset[]>(readUserPresets);
+  const [userPresets, setUserPresets] = useState<VoiceFxPreset[]>([]);
   const [favorites, setFavorites] = useState<string[]>(readFavorites);
   const [copied, setCopied] = useState(false);
 
@@ -115,6 +115,9 @@ function Panel({ onClose }: { onClose: () => void }) {
   const [activeSlot, setActiveSlot] = useState<"A" | "B">("A");
 
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load user presets from the server on mount.
+  useEffect(() => { void fetchUserPresets().then(setUserPresets); }, []);
 
   // Stop any playback and clear timers when the panel unmounts (modal closes).
   useEffect(() => () => {
@@ -176,7 +179,7 @@ function Panel({ onClose }: { onClose: () => void }) {
     };
     const next = [...userPresets, newPreset];
     setUserPresets(next);
-    writeUserPresets(next);
+    void saveUserPresets(next).catch(console.error);
     setCfg((prev) => ({ ...prev, preset: newPreset.id }));
   }
 
@@ -197,14 +200,14 @@ function Panel({ onClose }: { onClose: () => void }) {
     };
     const next = [...userPresets, newPreset];
     setUserPresets(next);
-    writeUserPresets(next);
+    void saveUserPresets(next).catch(console.error);
     setCfg({ ...merged, preset: newPreset.id });
   }
 
   function deleteUserPreset(id: string) {
     const next = userPresets.filter((p) => p.id !== id);
     setUserPresets(next);
-    writeUserPresets(next);
+    void saveUserPresets(next).catch(console.error);
     if (cfg.preset === id) patch({ preset: "custom" });
   }
 

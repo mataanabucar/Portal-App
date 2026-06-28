@@ -594,16 +594,27 @@ export function buildOutputSummary(fx: VoiceFx): OutputSummary {
 // Persistence: user presets + favorites
 // ---------------------------------------------------------------------------
 
-const USER_PRESETS_KEY = "tts-user-presets";
 const FAVORITES_KEY = "tts-fav-presets";
 
-export function readUserPresets(): VoiceFxPreset[] {
-  const saved = readLocal<VoiceFxPreset[]>(USER_PRESETS_KEY);
-  return Array.isArray(saved) ? saved : [];
+/** Fetch user presets from the server (file-backed, survives browser clears). */
+export async function fetchUserPresets(): Promise<VoiceFxPreset[]> {
+  try {
+    const res = await fetch("/api/tts/presets");
+    if (!res.ok) return [];
+    const data: unknown = await res.json();
+    return Array.isArray(data) ? (data as VoiceFxPreset[]) : [];
+  } catch {
+    return [];
+  }
 }
 
-export function writeUserPresets(presets: VoiceFxPreset[]): void {
-  writeLocal(USER_PRESETS_KEY, presets);
+/** Persist user presets to the server (fire-and-forget is fine). */
+export async function saveUserPresets(presets: VoiceFxPreset[]): Promise<void> {
+  await fetch("/api/tts/presets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(presets),
+  });
 }
 
 export function readFavorites(): string[] {
