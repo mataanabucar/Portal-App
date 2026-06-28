@@ -783,7 +783,7 @@ function Panel({ onClose }: { onClose: () => void }) {
                 )}
 
                 <p className="mt-2 text-[0.62rem] leading-snug text-slate-500">
-                  Runs natively in the FFmpeg chain (needs <span className="text-slate-300">Apply FFmpeg</span> on). Install the TAP DLLs and set <span className="text-slate-300">LADSPA_PATH</span> to their folder, then <span className="text-slate-300">Load controls</span> to pull each plugin&apos;s real parameters as sliders.
+                  Runs natively in the FFmpeg chain (needs <span className="text-slate-300">Apply FFmpeg</span> on). TAP plugins are bundled in <span className="text-slate-300">resources/ladspa</span> and auto-loaded — once the DLLs are built there, just use the plain name (e.g. <span className="text-slate-300">tap_reverb</span>) and click <span className="text-slate-300">Load controls</span>.
                 </p>
               </Card>
 

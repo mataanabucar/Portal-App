@@ -375,22 +375,18 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
- * Quote/escape a filtergraph option value so full Windows paths (with `:` and
- * `\`) survive the parser, e.g. C:/x/tap.dll -> 'C\:/x/tap.dll'.
+ * Build a `ladspa=...` insert from the plugin fields (or null if unset).
+ * The library is emitted as a bare name (e.g. `tap_reverb`); the server resolves
+ * it to the bundled DLL and the OS-correct load form before running ffmpeg.
  */
-export function escFilterValue(v: string): string {
-  return "'" + v.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'") + "'";
-}
-
-/** Build a `ladspa=...` insert from the plugin fields (or null if unset). */
 export function buildLadspa(fx: VoiceFx): string | null {
   const file = fx.ladspaFile.trim();
   const plugin = fx.ladspaPlugin.trim();
   const controls = fx.ladspaControls.trim();
   if (!file && !plugin) return null;
   const seg: string[] = [];
-  if (file) seg.push(`f=${escFilterValue(file)}`);
-  if (plugin) seg.push(`p=${escFilterValue(plugin)}`);
+  if (file) seg.push(`f=${file}`);
+  if (plugin) seg.push(`p=${plugin}`);
   if (controls) seg.push(`c=${controls}`);
   return `ladspa=${seg.join(":")}`;
 }

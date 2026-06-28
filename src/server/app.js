@@ -2,9 +2,9 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, delimiter, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { buildConfig } from "./config/env.js";
 import {
   createAskService,
@@ -28,6 +28,20 @@ import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
+
+// App-bundled LADSPA plugin folder (resources/ladspa). DLLs placed here travel
+// with the app and are auto-discovered by FFmpeg via LADSPA_PATH below.
+const bundledLadspaDir = fileURLToPath(new URL("../../resources/ladspa/", import.meta.url));
+
+// Environment for spawned FFmpeg processes: prepend the bundled LADSPA folder to
+// any existing LADSPA_PATH so shipped TAP plugins load with zero setup.
+function ffmpegEnv() {
+  const existing = process.env.LADSPA_PATH;
+  return {
+    ...process.env,
+    LADSPA_PATH: existing ? `${bundledLadspaDir}${delimiter}${existing}` : bundledLadspaDir,
+  };
+}
 
 // ── TTS ───────────────────────────────────────────────────────────────────────
 
@@ -65,7 +79,7 @@ async function applyLoudnorm(inputBuffer, format = "mp3", volume = 1.0) {
         "-i", tmpIn,
         "-filter:a", `loudnorm=I=-16:TP=-1.5:LRA=11${volFilter}`,
         "-y", tmpOut,
-      ], (err) => (err ? reject(err) : resolve()));
+      ], { env: ffmpegEnv() }, (err) => (err ? reject(err) : resolve()));
     });
     return readFileSync(tmpOut);
   } finally {
@@ -99,10 +113,12 @@ async function applyFfmpegChain(inputBuffer, format, chain) {
   const id = randomBytes(8).toString("hex");
   const tmpIn = join(tmpdir(), `tts_fx_in_${id}.${ext}`);
   const tmpOut = join(tmpdir(), `tts_fx_out_${id}.${ext}`);
+  const { chain: runChain, cwd } = prepareLadspaChain(chain);
   try {
     writeFileSync(tmpIn, inputBuffer);
     await new Promise((resolve, reject) => {
-      execFile("ffmpeg", ["-i", tmpIn, "-filter:a", chain, "-y", tmpOut], (err) =>
+      const opts = { env: ffmpegEnv(), ...(cwd ? { cwd } : {}) };
+      execFile("ffmpeg", ["-i", tmpIn, "-filter:a", runChain, "-y", tmpOut], opts, (err) =>
         err ? reject(err) : resolve()
       );
     });
@@ -117,9 +133,9 @@ async function applyFfmpegChain(inputBuffer, format, chain) {
 // Pipeline: OpenAI audio → FFmpeg pre (-af) to WAV → MrsWatson(VST) → FFmpeg
 // finalize (-af: limiter/loudnorm/volume) → target format.
 
-function execFileAsync(file, args) {
+function execFileAsync(file, args, opts = {}) {
   return new Promise((resolve, reject) => {
-    execFile(file, args, { maxBuffer: 1024 * 1024 * 64 }, (err, stdout, stderr) =>
+    execFile(file, args, { maxBuffer: 1024 * 1024 * 64, ...opts }, (err, stdout, stderr) =>
       err ? reject(new Error((stderr && stderr.toString().trim()) || err.message)) : resolve()
     );
   });
@@ -130,12 +146,13 @@ async function ffmpegDecodeToWav(inputBuffer, inExt, preChain) {
   const id = randomBytes(8).toString("hex");
   const tmpIn = join(tmpdir(), `vst_pre_in_${id}.${inExt || "mp3"}`);
   const tmpOut = join(tmpdir(), `vst_pre_out_${id}.wav`);
+  const prepared = preChain ? prepareLadspaChain(preChain) : { chain: null, cwd: null };
   const args = ["-i", tmpIn];
-  if (preChain) args.push("-filter:a", preChain);
+  if (prepared.chain) args.push("-filter:a", prepared.chain);
   args.push("-ar", "48000", "-ac", "2", "-y", tmpOut);
   try {
     writeFileSync(tmpIn, inputBuffer);
-    await execFileAsync("ffmpeg", args);
+    await execFileAsync("ffmpeg", args, { env: ffmpegEnv(), ...(prepared.cwd ? { cwd: prepared.cwd } : {}) });
     return readFileSync(tmpOut);
   } finally {
     try { rmSync(tmpIn, { force: true }); } catch {}
@@ -154,7 +171,7 @@ async function ffmpegEncodeFromWav(wavBuffer, format, finalizeChain) {
   args.push("-y", tmpOut);
   try {
     writeFileSync(tmpIn, wavBuffer);
-    await execFileAsync("ffmpeg", args);
+    await execFileAsync("ffmpeg", args, { env: ffmpegEnv() });
     return readFileSync(tmpOut);
   } finally {
     try { rmSync(tmpIn, { force: true }); } catch {}
@@ -165,12 +182,15 @@ async function ffmpegEncodeFromWav(wavBuffer, format, finalizeChain) {
 // Split a plugin reference into MrsWatson's { name, root }. A full .dll path is
 // split into a search root + bare name; a bare name is used as-is.
 function parseVstPlugin(ref) {
-  const norm = String(ref).trim().replace(/\\/g, "/");
-  if (norm.includes("/")) {
-    const idx = norm.lastIndexOf("/");
-    return { root: norm.slice(0, idx), name: norm.slice(idx + 1).replace(/\.(dll|vst|so)$/i, "") };
+  const raw = String(ref).trim();
+  if (/[\\/]/.test(raw)) {
+    const norm = process.platform === "win32" ? raw.replace(/\//g, "\\") : raw.replace(/\\/g, "/");
+    return {
+      root: dirname(norm),
+      name: basename(norm).replace(/\.(dll|vst|so)$/i, ""),
+    };
   }
-  return { root: null, name: norm.replace(/\.(dll|vst|so)$/i, "") };
+  return { root: null, name: raw.replace(/\.(dll|vst|so)$/i, "") };
 }
 
 // "0,0.5;1,0.3" → ["--parameter","0,0.5","--parameter","1,0.3"]
@@ -212,13 +232,36 @@ async function applyMrsWatson(wavBuffer, { hostPath, plugin, params }) {
   }
 }
 
-// ── LADSPA control introspection ────────────────────────────────────────────
-// Enumerate a LADSPA plugin's real input controls (names/ranges/defaults) by
-// instantiating it in FFmpeg with a deliberately-invalid control, which makes
-// af_ladspa print the valid control list to stderr.
+// ── LADSPA plugin loading + control introspection ───────────────────────────
+// FFmpeg's af_ladspa only treats the `f=` argument as a path when it starts
+// with '/' or '.'; a Windows path (C:\..) is otherwise treated as a plugin
+// NAME and searched on LADSPA_PATH (split on ':', appending '.so') — which is
+// broken for Windows .dll. The portable fix: run ffmpeg with cwd = the plugin's
+// directory and reference it as a relative './name.dll'.
 
-function escFilterValue(v) {
-  return "'" + String(v).replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'") + "'";
+// Resolve a LADSPA file reference to { dir, fArg } for the './name' load form.
+// A bare name resolves to the app's bundled resources/ladspa folder.
+function resolveLadspaTarget(file) {
+  const f = String(file || "").trim();
+  if (!/[\\/]/.test(f)) {
+    const base = /\.(dll|so)$/i.test(f) ? f : `${f}.dll`;
+    return { dir: bundledLadspaDir, fArg: `./${base}` };
+  }
+  const norm = f.replace(/\\/g, "/");
+  return { dir: dirname(norm), fArg: `./${basename(norm)}` };
+}
+
+// Rewrite bare `ladspa=f=<name>` references in a chain to the relative './name.dll'
+// form and return the cwd ffmpeg must run in. Bare names only (paths left alone).
+function prepareLadspaChain(chain) {
+  let cwd = null;
+  const out = chain.replace(/ladspa=f=([A-Za-z0-9_.\-]+)(?=:|,|$)/g, (m, file) => {
+    const t = resolveLadspaTarget(file);
+    if (!existsSync(join(t.dir, t.fArg.replace(/^\.\//, "")))) return m;
+    if (!cwd) cwd = t.dir;
+    return `ladspa=f=${t.fArg}`;
+  });
+  return { chain: out, cwd };
 }
 
 // FFmpeg (af_ladspa) prints lines like:
@@ -264,28 +307,31 @@ function parseLadspaControls(stderr) {
 }
 
 async function introspectLadspa(file, plugin) {
-  // Instantiate the plugin with no controls; af_ladspa lists its controls.
-  const filter = `ladspa=f=${escFilterValue(file)}:p=${escFilterValue(plugin)}`;
+  // `c=help` makes af_ladspa print its input controls; run from the plugin's
+  // dir with a relative './name.dll' so the win32 loader accepts it.
+  const { dir, fArg } = resolveLadspaTarget(file);
+  const filter = `ladspa=f=${fArg}:p=${plugin}:c=help`;
   const args = [
-    "-hide_banner", "-v", "verbose",
+    "-hide_banner", "-v", "info",
     "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "0.1",
     "-af", filter, "-f", "null", "-",
   ];
   const stderr = await new Promise((resolve) => {
-    execFile("ffmpeg", args, { maxBuffer: 1024 * 1024 * 8 }, (_err, _stdout, serr) =>
+    execFile("ffmpeg", args, { maxBuffer: 1024 * 1024 * 8, env: ffmpegEnv(), cwd: dir }, (_err, _stdout, serr) =>
       resolve(serr ? String(serr) : "")
     );
   });
   const controls = parseLadspaControls(stderr);
   if (controls.length === 0) {
+    if (/does not have any input controls/i.test(stderr)) return [];
     const failed = /Failed to load '([^']+)'/.exec(stderr);
     if (failed) {
       throw new Error(
-        `Failed to load '${failed[1]}'. Check: (1) the .dll is on LADSPA_PATH or give a full path, ` +
-          `and (2) it's a 64-bit DLL — this FFmpeg is x86-64 and cannot load 32-bit LADSPA plugins.`
+        `Failed to load '${failed[1]}'. Build the 64-bit DLL into resources/ladspa ` +
+          `(this FFmpeg is x86-64) or give a full path to the .dll.`
       );
     }
-    throw new Error("No controls found — check the library/plugin names and that LADSPA_PATH is set.");
+    throw new Error(`Could not read controls for '${plugin}' — is the DLL built in resources/ladspa?`);
   }
   return controls;
 }
@@ -323,6 +369,36 @@ function ttsSetCache(key, buffer) {
     ttsCache.delete(ttsCache.keys().next().value);
   }
   ttsCache.set(key, buffer);
+}
+
+function buildTtsCacheKey({
+  voice,
+  format,
+  speed,
+  volume,
+  afChain,
+  finalizeChain,
+  vst,
+  instructions,
+  text,
+}) {
+  // Hash the full effective request so late-chain controls (for example LADSPA
+  // cN values) cannot collide with an older cached render.
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        voice,
+        format,
+        speed,
+        volume,
+        afChain,
+        finalizeChain,
+        vst,
+        instructions,
+        text,
+      })
+    )
+    .digest("hex");
 }
 
 function buildVoiceReplayPrompt(reportText, cardJson) {
@@ -840,10 +916,17 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const MIME = { mp3: "audio/mpeg", opus: "audio/opus", aac: "audio/aac", flac: "audio/flac", wav: "audio/wav", pcm: "audio/pcm" };
       const contentType = MIME[format] ?? "audio/mpeg";
 
-      const instrKey = finalInstructions.length > 80 ? finalInstructions.slice(0, 80) : finalInstructions;
-      const chainKey = finalAfChain ? finalAfChain.slice(0, 120) : "";
-      const vstKey = finalVst ? `${finalVst.plugin}:${finalVst.params ?? ""}` : "";
-      const cacheKey = `${finalVoice}:${format}:${finalSpeed ?? ""}:${finalVolume}:${chainKey}:${vstKey}:${instrKey}:${cleanText}`;
+      const cacheKey = buildTtsCacheKey({
+        voice: finalVoice,
+        format,
+        speed: finalSpeed,
+        volume: finalVolume,
+        afChain: finalAfChain,
+        finalizeChain,
+        vst: finalVst,
+        instructions: finalInstructions,
+        text: cleanText,
+      });
 
       if (ttsCache.has(cacheKey)) {
         response.setHeader("Content-Type", contentType);
