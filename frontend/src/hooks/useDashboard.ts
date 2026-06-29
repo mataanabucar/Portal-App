@@ -25,8 +25,10 @@ export interface UseDashboardResult {
   isCheckingConnection: boolean;
   loadingProgress: number;
   loadingLabel: string;
-  refresh: () => void;
-  refreshWithRequest: (nextReq: DashboardRequest) => void;
+  refresh: () => Promise<DashboardResponse | undefined>;
+  refreshWithRequest: (
+    nextReq: DashboardRequest
+  ) => Promise<DashboardResponse | undefined>;
 }
 
 export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
@@ -151,9 +153,11 @@ export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
     };
   }, []);
 
-  const runRefresh = (nextReq?: DashboardRequest) => {
+  const runRefresh = async (
+    nextReq?: DashboardRequest
+  ): Promise<DashboardResponse | undefined> => {
     if (!backendReady) {
-      return;
+      return undefined;
     }
 
     const activeRequest = nextReq ?? requestRef.current;
@@ -163,29 +167,30 @@ export function useDashboard(req: DashboardRequest = {}): UseDashboardResult {
 
     const stopTrickle = startProgressTrickle(setLoadingProgress, setLoadingLabel);
 
-    api
-      .dashboard(activeRequest)
-      .then(async (fresh) => {
-        stopTrickle();
-        await persistDashboardCache(fresh, activeRequest);
-        setData(fresh);
-        setLoadingProgress(100);
-        setLoadingLabel("QUEUE READY");
-        await settleLoading();
-      })
-      .catch((err: Error) => {
-        stopTrickle();
-        setError(err);
-      })
-      .finally(() => setRefreshing(false));
+    try {
+      const fresh = await api.dashboard(activeRequest);
+      stopTrickle();
+      await persistDashboardCache(fresh, activeRequest);
+      setData(fresh);
+      setLoadingProgress(100);
+      setLoadingLabel("QUEUE READY");
+      await settleLoading();
+      return fresh;
+    } catch (err) {
+      stopTrickle();
+      setError(err as Error);
+      return undefined;
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const refresh = () => {
-    runRefresh();
+    return runRefresh();
   };
 
   const refreshWithRequest = (nextReq: DashboardRequest) => {
-    runRefresh(nextReq);
+    return runRefresh(nextReq);
   };
 
   const items = data ? buildCardItems(data) : [];

@@ -1,11 +1,65 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-GraphClientSecret {
+$script:DotEnvValues = $null
+
+function Get-DotEnvValues {
+    if ($null -ne $script:DotEnvValues) {
+        return $script:DotEnvValues
+    }
+
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    $dotEnvPath = Join-Path $repoRoot ".env"
+    $values = @{}
+
+    if (Test-Path -LiteralPath $dotEnvPath) {
+        foreach ($line in Get-Content -LiteralPath $dotEnvPath) {
+            $trimmedLine = $line.Trim()
+
+            if (-not $trimmedLine -or $trimmedLine.StartsWith("#")) {
+                continue
+            }
+
+            $parts = $trimmedLine -split "=", 2
+
+            if ($parts.Count -lt 2) {
+                continue
+            }
+
+            $key = $parts[0].Trim()
+            $value = $parts[1].Trim()
+
+            if (
+                ($value.Length -ge 2) -and
+                (
+                    ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+                    ($value.StartsWith("'") -and $value.EndsWith("'"))
+                )
+            ) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+
+            if ($key) {
+                $values[$key] = $value
+            }
+        }
+    }
+
+    $script:DotEnvValues = $values
+    return $script:DotEnvValues
+}
+
+function Get-ConfigValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
     $candidateValues = @(
-        $env:GRAPH_CLIENT_SECRET,
-        [Environment]::GetEnvironmentVariable("GRAPH_CLIENT_SECRET", "User"),
-        [Environment]::GetEnvironmentVariable("GRAPH_CLIENT_SECRET", "Machine")
+        (Get-DotEnvValues)[$Name],
+        [Environment]::GetEnvironmentVariable($Name, "Process"),
+        [Environment]::GetEnvironmentVariable($Name, "User"),
+        [Environment]::GetEnvironmentVariable($Name, "Machine")
     ) | Where-Object {
         $_ -and $_.Trim()
     }
@@ -13,44 +67,56 @@ function Get-GraphClientSecret {
     if ($candidateValues.Count -gt 0) {
         return $candidateValues[0]
     }
+}
 
-    throw (
-        "GRAPH_CLIENT_SECRET is not set. Save it once with " +
-        "[Environment]::SetEnvironmentVariable(""GRAPH_CLIENT_SECRET"", ""<secret>"", ""User"") " +
-        "and reopen PowerShell before rerunning this script."
+function Get-RequiredConfigValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ErrorMessage
     )
+
+    $value = Get-ConfigValue -Name $Name
+
+    if ($value) {
+        return $value
+    }
+
+    throw $ErrorMessage
 }
 
 function Get-GraphScopes {
-    $candidateScopes = @(
-        $env:GRAPH_SCOPES,
-        [Environment]::GetEnvironmentVariable("GRAPH_SCOPES", "User"),
-        [Environment]::GetEnvironmentVariable("GRAPH_SCOPES", "Machine")
-    ) | Where-Object {
-        $_ -and $_.Trim()
-    }
+    $candidateScopes = Get-ConfigValue -Name "GRAPH_SCOPES"
 
-    if ($candidateScopes.Count -gt 0) {
-        return (($candidateScopes[0] -split "\s+") | Where-Object { $_ }) -join " "
+    if ($candidateScopes) {
+        return (($candidateScopes -split "\s+") | Where-Object { $_ }) -join " "
     }
 
     return "offline_access User.Read Mail.Read Calendars.Read"
 }
 
-$TenantId = "162035a0-31d1-4b3c-a276-491c1dbea2f1"
-$ClientId = "1fb8c198-909a-412b-9b2e-20450f6e7ecc"
-$ClientSecret = Get-GraphClientSecret
-$RedirectUri = if ($env:GRAPH_TESTER_REDIRECT_URI) {
-    $env:GRAPH_TESTER_REDIRECT_URI
-} elseif ($env:GRAPH_REDIRECT_URI) {
-    $env:GRAPH_REDIRECT_URI
+$TenantId = Get-RequiredConfigValue -Name "GRAPH_TENANT_ID" -ErrorMessage (
+    "GRAPH_TENANT_ID is not set in .env or the environment."
+)
+$ClientId = Get-RequiredConfigValue -Name "GRAPH_CLIENT_ID" -ErrorMessage (
+    "GRAPH_CLIENT_ID is not set in .env or the environment."
+)
+$ClientSecret = Get-RequiredConfigValue -Name "GRAPH_CLIENT_SECRET" -ErrorMessage (
+    "GRAPH_CLIENT_SECRET is not set in .env or the environment."
+)
+$RedirectUri = if (Get-ConfigValue -Name "GRAPH_TESTER_REDIRECT_URI") {
+    Get-ConfigValue -Name "GRAPH_TESTER_REDIRECT_URI"
+} elseif (Get-ConfigValue -Name "GRAPH_REDIRECT_URI") {
+    Get-ConfigValue -Name "GRAPH_REDIRECT_URI"
 } else {
     "http://localhost:3069/auth/redirect"
 }
 $Scope = Get-GraphScopes
 
-$TokenCachePath = if ($env:GRAPH_TESTER_TOKEN_CACHE_FILE) {
-    $env:GRAPH_TESTER_TOKEN_CACHE_FILE
+$TokenCachePath = if (Get-ConfigValue -Name "GRAPH_TESTER_TOKEN_CACHE_FILE") {
+    Get-ConfigValue -Name "GRAPH_TESTER_TOKEN_CACHE_FILE"
 } else {
     Join-Path (Split-Path -Parent $PSScriptRoot) ".local-auth\graph-tester-token.json"
 }

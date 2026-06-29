@@ -9,6 +9,7 @@ import { AISummaryCard } from "@/components/ai-summary/AISummaryCard";
 import { QuickReadModal } from "@/components/quick-read/QuickReadModal";
 import { TtsConfigModal } from "@/components/tts/TtsConfigModal";
 import { ResearchTestModal } from "@/components/research/ResearchTestModal";
+import { RealtimeAssistantDock } from "@/components/assistant/RealtimeAssistantDock";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
 import { orderByPriority } from "@/lib/priority";
 import { readLocal, subscribeLocal, writeLocal } from "@/lib/storage";
@@ -190,6 +191,14 @@ export function DashboardPage() {
       <ResearchTestModal
         open={researchTestOpen}
         onClose={() => setResearchTestOpen(false)}
+      />
+
+      <RealtimeAssistantDock
+        items={orderedItems}
+        summary={data?.summary?.summary}
+        tone={summaryTone}
+        isRefreshing={isRefreshing}
+        refresh={refresh}
       />
     </div>
   );

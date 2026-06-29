@@ -9,10 +9,12 @@
  *   Mail.ReadWrite            – createDraftMessage, updateDraftMessage,
  *                               setMessageReadState, moveMessage, deleteMessage
  *   Mail.ReadWrite.Shared     – createSharedMailboxDraft
+ *   Mail.Send                 – sendMail, sendDraftMessage, sendSharedMailboxMail
  *
- * NOTE: Mail.Send is NOT in the granted scope list.
- *       No send function is implemented here.
- *       Add sendMessage() only after Mail.Send is added to the app registration.
+ * NOTE: The send functions require Mail.Send (and Mail.ReadWrite for the
+ *       draft-then-send flow) to be granted on the app registration and present
+ *       in the signed-in user's token. Callers must gate sending behind explicit
+ *       user confirmation.
  */
 
 import { graphRequest, graphGetAllPages } from "../graphRequest.js";
@@ -417,6 +419,15 @@ export async function listSharedMailboxFolders(token, sharedMailbox, { top, sele
 /** @scope Mail.Send */
 export async function sendMail(token, messageInput) {
   return graphRequest({ method: "POST", path: "/me/sendMail", token, body: { message: messageInput } });
+}
+
+/**
+ * Send an existing draft message (created via createDraftMessage). Returns no
+ * body (Graph responds 202 Accepted). The draft's id identifies the message.
+ * @scope Mail.Send
+ */
+export async function sendDraftMessage(token, messageId) {
+  return graphRequest({ method: "POST", path: `/me/messages/${encodeURIComponent(messageId)}/send`, token });
 }
 
 /** @scope Mail.Send.Shared */

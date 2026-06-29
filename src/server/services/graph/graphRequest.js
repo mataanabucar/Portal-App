@@ -51,7 +51,8 @@ export async function graphRequest({ method, path, token, query, body, headers =
 
     if (response.ok) {
       if (binary) return response;
-      if (response.status === 204) return undefined;
+      // 202 Accepted (e.g. sendMail / message send) and 204 No Content carry no body.
+      if (response.status === 204 || response.status === 202) return undefined;
       return response.json();
     }
 

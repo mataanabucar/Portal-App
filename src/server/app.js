@@ -1,9 +1,9 @@
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
-import { writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, rmSync, existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, delimiter, dirname, basename } from "node:path";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { createHash, randomBytes } from "node:crypto";
 import { buildConfig } from "./config/env.js";
 import {
@@ -22,12 +22,29 @@ import {
   parseTesterConfigQuery
 } from "./services/testerConfig.js";
 import { findItemEmail } from "./services/graph/services/itemEmailService.js";
+import { createDraftMessage, sendDraftMessage } from "./services/graph/services/mailService.js";
 import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
 import { registerKbDebugRoutes } from "./services/kb/debugRoutes.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
+
+// File-backed user TTS presets (shared by the /api/tts/presets endpoints and the
+// realtime assistant, which inherits a preset's voice + persona instructions).
+const USER_PRESETS_FILE = fileURLToPath(new URL("../../user-data/tts-presets.json", import.meta.url));
+
+// Append-only audit log of emails sent via /api/email/send. Records recipients,
+// subject, body size, and attachment metadata — never tokens or secrets.
+const EMAIL_SEND_LOG_FILE = fileURLToPath(new URL("../../.local-state/email-send-log.jsonl", import.meta.url));
+
+// Conservative caps for assistant-initiated mail (simple attachments only).
+const EMAIL_MAX_RECIPIENTS = 25;
+const EMAIL_MAX_SUBJECT_CHARS = 255;
+const EMAIL_MAX_BODY_CHARS = 100000;
+const EMAIL_MAX_ATTACHMENTS = 5;
+const EMAIL_MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024; // Graph "simple" attachment limit
+const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // App-bundled LADSPA plugin folder (resources/ladspa). DLLs placed here travel
 // with the app and are auto-discovered by FFmpeg via LADSPA_PATH below.
@@ -353,6 +370,8 @@ const TTS_MAX_CHARS = 6000;
 const TTS_CACHE_MAX = 50;
 const VOICE_REPLAY_CONTEXT_MAX_CHARS = 14000;
 const VOICE_REPLAY_SCRIPT_MAX_CHARS = 4500;
+const REALTIME_MAX_OUTPUT_TOKENS_LIMIT = 4096;
+const REALTIME_MAX_OFFER_SDP_CHARS = 100 * 1024;
 const ttsCache = new Map();
 
 function cleanTtsText(text) {
@@ -426,6 +445,355 @@ function buildVoiceReplayPrompt(reportText, cardJson) {
   ].join("\n");
 }
 
+function buildRealtimeAssistantInstructions(hasPersona = false) {
+  const lines = [
+    "You are Mataan's realtime AI work assistant, embedded in his portal dashboard.",
+    "You are a fully capable AI assistant with broad general knowledge and strong reasoning.",
+    "Use that knowledge freely: explain concepts, help debug code and errors, brainstorm, draft and rewrite text, do analysis, and reason through problems like a sharp, knowledgeable colleague.",
+    "Never claim you lack knowledge or can 'only use portal tools' — you have full general knowledge in addition to the live portal context and tools.",
+    "On top of that, you have live access to Mataan's portal work queue: the dashboard context provided to you in this session, plus read-only tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question, search_docs).",
+    "Use the provided dashboard context and these tools whenever a question is about his specific queue items, statuses, due dates, blockers, research findings, or email context.",
+    "You also have a documentation knowledge base of Mataan's own systems (ATS and calendar: backend/frontend architecture, database schemas, table relationships, design notes). When asked how those systems work, call search_docs to pull the relevant excerpts and answer from them; do not say you lack access to his documentation.",
+    "Grounding rule applies ONLY to portal-specific facts (a particular item's status, ID, owner, due date, blockers, research results): rely on the provided context or a tool rather than guessing, and if you don't have it, say so or offer to fetch it.",
+    "For everything else — general knowledge, explanations, debugging, advice, drafting — just answer directly from your own expertise.",
+    "When it matters, distinguish confirmed portal facts from your own assumptions or suggestions.",
+    "Keep spoken answers concise unless asked for more detail.",
+    "Ask for a brief confirmation before refreshing the queue or any other state-changing action.",
+    "Treat Benchmark and client data as private, and never reveal secrets, cookies, tokens, auth headers, or credentials.",
+  ];
+
+  // Only impose the default tone when no persona preset is governing delivery;
+  // otherwise the persona below owns tone/personality.
+  if (!hasPersona) {
+    lines.push("Be professional, direct, and lightly conversational.");
+  }
+
+  return lines.join(" ");
+}
+
+const REALTIME_EMPTY_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {},
+  additionalProperties: false,
+};
+
+const REALTIME_TOOLS = [
+  {
+    type: "function",
+    name: "get_queue_snapshot",
+    description:
+      "Get a compact snapshot of the current dashboard queue, including item titles, status, priority, due dates, and next actions.",
+    parameters: REALTIME_EMPTY_TOOL_PARAMETERS,
+  },
+  {
+    type: "function",
+    name: "refresh_queue",
+    description:
+      "Refresh the dashboard queue. Only call this after the user explicitly asks to refresh, reload, or re-check the queue.",
+    parameters: REALTIME_EMPTY_TOOL_PARAMETERS,
+  },
+  {
+    type: "function",
+    name: "research_item",
+    description:
+      "Research one queue item by title or ID and answer a focused question using the existing portal research pipeline.",
+    parameters: {
+      type: "object",
+      properties: {
+        itemTitleOrId: {
+          type: "string",
+          description: "The queue item title, request ID, or related action item.",
+        },
+        question: {
+          type: "string",
+          description: "The focused research question to investigate.",
+        },
+      },
+      required: ["itemTitleOrId", "question"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "get_item_email_context",
+    description:
+      "Look up the most relevant email context for an item by request ID or related action item.",
+    parameters: {
+      type: "object",
+      properties: {
+        requestId: {
+          type: "string",
+          description: "The Request ID shown on the queue item.",
+        },
+        relatedActionItem: {
+          type: "string",
+          description: "The Related Action Item shown on the queue item.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "ask_portal_question",
+    description:
+      "Ask a concise portal question that can be answered from the current queue context without running deeper research.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The question to answer.",
+        },
+        itemContext: {
+          type: "string",
+          description:
+            "Optional item-specific context to include with the question.",
+        },
+      },
+      required: ["question"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "search_docs",
+    description:
+      "Search Mataan's documentation knowledge base (ATS and calendar system architecture, database schemas, table relationships, and backend/frontend design docs) for relevant excerpts. Use this for questions about how those systems are built or work.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "What to look up in the documentation.",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "send_email",
+    description:
+      "Compose an email and stage it for Mataan to review. This does NOT send immediately: it prepares the message and Mataan must explicitly confirm it in the portal UI before it is sent via Microsoft Graph. Use this only when Mataan asks to send or draft an email. Always read the recipients and subject back to him before calling this.",
+    parameters: {
+      type: "object",
+      properties: {
+        to: {
+          type: "array",
+          items: { type: "string" },
+          description: "Recipient email addresses (the To line). At least one is required.",
+        },
+        subject: {
+          type: "string",
+          description: "The email subject line.",
+        },
+        body: {
+          type: "string",
+          description: "The plain-text body of the email.",
+        },
+        cc: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional CC email addresses.",
+        },
+      },
+      required: ["to", "subject", "body"],
+      additionalProperties: false,
+    },
+  },
+];
+
+// Voices accepted by the OpenAI realtime API. Preset voices outside this set
+// (e.g. TTS-only voices) fall back to the configured default.
+const REALTIME_VOICES = new Set([
+  "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse", "marin", "cedar",
+]);
+
+const REALTIME_PERSONA_MAX_CHARS = 4000;
+
+function buildRealtimeSessionConfig(config, overrides = {}) {
+  const session = {
+    type: "realtime",
+    model: normalizeRealtimeModel(config.openAiRealtimeModel),
+    instructions: buildRealtimeInstructions(overrides.instructions),
+    output_modalities: ["audio"],
+    audio: {
+      input: buildRealtimeAudioInput(config),
+      output: {
+        voice: resolveRealtimeVoice(overrides.voice, config.openAiRealtimeVoice),
+      },
+    },
+    tools: REALTIME_TOOLS,
+    tool_choice: "auto",
+    max_output_tokens: normalizeRealtimeMaxOutputTokens(
+      config.openAiRealtimeMaxOutputTokens
+    ),
+  };
+
+  const reasoning = buildRealtimeReasoningConfig(
+    session.model,
+    config.openAiRealtimeReasoningEffort
+  );
+  if (reasoning) {
+    session.reasoning = reasoning;
+  }
+
+  return session;
+}
+
+function buildRealtimeReasoningConfig(model, effort) {
+  if (!supportsRealtimeReasoning(model)) {
+    return null;
+  }
+
+  const normalizedEffort = normalizeRealtimeReasoningEffort(effort);
+  return normalizedEffort ? { effort: normalizedEffort } : null;
+}
+
+function normalizeRealtimeModel(value) {
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : "merlin";
+}
+
+function normalizeRealtimeVoice(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "marin";
+}
+
+// Build the realtime input-audio config. Pins a transcription language and
+// enables noise reduction to reduce non-speech transcription hallucinations
+// (e.g. phantom Japanese phrases on background noise/silence).
+function buildRealtimeAudioInput(config) {
+  const transcription = { model: "gpt-4o-mini-transcribe" };
+  const language = normalizeRealtimeTranscribeLanguage(config.openAiRealtimeTranscribeLanguage);
+  if (language) {
+    transcription.language = language;
+  }
+
+  const input = {
+    transcription,
+    turn_detection: { type: "semantic_vad" },
+  };
+
+  const noiseReduction = normalizeRealtimeNoiseReduction(config.openAiRealtimeNoiseReduction);
+  if (noiseReduction) {
+    input.noise_reduction = { type: noiseReduction };
+  }
+
+  return input;
+}
+
+function normalizeRealtimeTranscribeLanguage(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (!normalized || normalized === "auto") {
+    return "";
+  }
+  // Accept ISO-639-1 ("en") or locale ("en-us"); ignore anything malformed.
+  return /^[a-z]{2}(-[a-z]{2})?$/.test(normalized) ? normalized : "";
+}
+
+function normalizeRealtimeNoiseReduction(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "off" || normalized === "none") {
+    return "";
+  }
+  return normalized === "far_field" ? "far_field" : "near_field";
+}
+
+// Prefer the preset's voice when it is a valid realtime voice; otherwise fall
+// back to the server-configured default.
+function resolveRealtimeVoice(preferred, fallback) {
+  const wanted = typeof preferred === "string" ? preferred.trim().toLowerCase() : "";
+  if (REALTIME_VOICES.has(wanted)) {
+    return wanted;
+  }
+  return normalizeRealtimeVoice(fallback);
+}
+
+// Append a preset's persona (tone/delivery style) to the base work-assistant
+// instructions so the assistant keeps its capabilities but speaks in the preset
+// voice. Returns the base instructions unchanged when no persona is supplied.
+function buildRealtimeInstructions(persona) {
+  const style =
+    typeof persona === "string"
+      ? persona.replace(/\s+/g, " ").trim().slice(0, REALTIME_PERSONA_MAX_CHARS)
+      : "";
+  const base = buildRealtimeAssistantInstructions(Boolean(style));
+  if (!style) {
+    return base;
+  }
+
+  return [
+    base,
+    "",
+    "Voice and persona — this is who you are and how you speak. It fully governs your tone, delivery, pacing, vocabulary, warmth, and personality, and overrides any default style guidance. Stay in this character throughout the conversation while still using your full capabilities, the tools, and the grounding/privacy/safety rules above:",
+    style,
+  ].join("\n");
+}
+
+// Resolve a saved user preset by id from the file-backed presets store.
+function loadUserPresetById(presetId) {
+  const id = typeof presetId === "string" ? presetId.trim() : "";
+  if (!id || !existsSync(USER_PRESETS_FILE)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(USER_PRESETS_FILE, "utf8"));
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed.find((preset) => preset && preset.id === id) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRealtimeReasoningEffort(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "low" || normalized === "medium" || normalized === "high"
+    ? normalized
+    : "";
+}
+
+function normalizeRealtimeMaxOutputTokens(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return 900;
+  }
+
+  return Math.min(
+    REALTIME_MAX_OUTPUT_TOKENS_LIMIT,
+    Math.max(1, parsed)
+  );
+}
+
+function supportsRealtimeReasoning(model) {
+  const normalized = normalizeRealtimeModel(model).toLowerCase();
+  return (
+    normalized === "gpt-realtime-2" ||
+    normalized === "gpt-realtime-2025-08-28"
+  );
+}
+
+function extractRealtimeErrorDetail(rawText, status) {
+  const fallback = `OpenAI returned ${status}.`;
+  if (typeof rawText !== "string" || !rawText.trim()) {
+    return fallback;
+  }
+
+  try {
+    const parsed = JSON.parse(rawText);
+    if (typeof parsed?.error?.message === "string" && parsed.error.message.trim()) {
+      return parsed.error.message.trim();
+    }
+  } catch {}
+
+  return rawText.trim().slice(0, 240) || fallback;
+}
+
 function normalizeVoiceReplayContext(value) {
   return typeof value === "string"
     ? value.replace(/\s+\n/g, "\n").trim().slice(0, VOICE_REPLAY_CONTEXT_MAX_CHARS)
@@ -437,6 +805,135 @@ function normalizeVoiceReplayScript(value) {
     ? value.replace(/\s+\n/g, "\n").trim().slice(0, VOICE_REPLAY_SCRIPT_MAX_CHARS)
     : "";
 }
+
+// ── Email send helpers (/api/email/send) ────────────────────────────────────
+
+function normalizeEmailRecipients(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,;]/)
+      : [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of raw) {
+    const address = typeof entry === "string" ? entry.trim() : "";
+    const key = address.toLowerCase();
+    if (address && !seen.has(key)) {
+      seen.add(key);
+      out.push(address);
+    }
+  }
+  return out;
+}
+
+function normalizeEmailAttachments(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const out = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    const contentBase64 =
+      typeof entry.contentBase64 === "string" ? entry.contentBase64.trim() : "";
+    if (!name || !contentBase64) {
+      continue;
+    }
+    const contentType =
+      typeof entry.contentType === "string" && entry.contentType.trim()
+        ? entry.contentType.trim()
+        : "application/octet-stream";
+    // base64 length → approximate decoded byte size.
+    const bytes = Math.floor((contentBase64.replace(/=+$/, "").length * 3) / 4);
+    out.push({ name, contentType, contentBase64, bytes });
+  }
+  return out;
+}
+
+// Validate + normalize an /api/email/send body. Returns { error } or a clean
+// { to, cc, subject, body, bodyType, attachments } payload.
+function parseEmailSendRequest(body) {
+  const source = body && typeof body === "object" ? body : {};
+
+  const to = normalizeEmailRecipients(source.to);
+  const cc = normalizeEmailRecipients(source.cc);
+  const subject = typeof source.subject === "string" ? source.subject.trim() : "";
+  const content = typeof source.body === "string" ? source.body : "";
+  const bodyType = source.bodyType === "HTML" ? "HTML" : "Text";
+
+  if (to.length === 0) {
+    return { error: "At least one 'to' recipient is required." };
+  }
+  if (to.length + cc.length > EMAIL_MAX_RECIPIENTS) {
+    return { error: `Too many recipients (max ${EMAIL_MAX_RECIPIENTS}).` };
+  }
+  const invalid = [...to, ...cc].find((address) => !EMAIL_ADDRESS_PATTERN.test(address));
+  if (invalid) {
+    return { error: `Invalid email address: ${invalid}` };
+  }
+  if (!subject) {
+    return { error: "A subject is required." };
+  }
+  if (subject.length > EMAIL_MAX_SUBJECT_CHARS) {
+    return { error: `Subject is too long (max ${EMAIL_MAX_SUBJECT_CHARS} characters).` };
+  }
+  if (!content.trim()) {
+    return { error: "A non-empty body is required." };
+  }
+  if (content.length > EMAIL_MAX_BODY_CHARS) {
+    return { error: `Body is too long (max ${EMAIL_MAX_BODY_CHARS} characters).` };
+  }
+
+  const attachments = normalizeEmailAttachments(source.attachments);
+  if (attachments.length > EMAIL_MAX_ATTACHMENTS) {
+    return { error: `Too many attachments (max ${EMAIL_MAX_ATTACHMENTS}).` };
+  }
+  const oversized = attachments.find((file) => file.bytes > EMAIL_MAX_ATTACHMENT_BYTES);
+  if (oversized) {
+    return { error: `Attachment "${oversized.name}" exceeds the 3 MB limit.` };
+  }
+
+  return { to, cc, subject, body: content, bodyType, attachments };
+}
+
+function toGraphRecipients(addresses) {
+  return addresses.map((address) => ({ emailAddress: { address } }));
+}
+
+function buildGraphDraftInput(parsed) {
+  const draft = {
+    subject: parsed.subject,
+    body: { contentType: parsed.bodyType, content: parsed.body },
+    toRecipients: toGraphRecipients(parsed.to),
+  };
+  if (parsed.cc.length > 0) {
+    draft.ccRecipients = toGraphRecipients(parsed.cc);
+  }
+  if (parsed.attachments.length > 0) {
+    draft.attachments = parsed.attachments.map((file) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: file.name,
+      contentType: file.contentType,
+      contentBytes: file.contentBase64,
+    }));
+  }
+  return draft;
+}
+
+// Append a non-sensitive audit record. Never logs tokens or attachment bytes.
+function logEmailSend(entry) {
+  try {
+    mkdirSync(dirname(EMAIL_SEND_LOG_FILE), { recursive: true });
+    appendFileSync(EMAIL_SEND_LOG_FILE, `${JSON.stringify(entry)}\n`, "utf8");
+  } catch (error) {
+    console.error("[/api/email/send] failed to append audit log:", error.message);
+  }
+}
+
 const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
@@ -446,6 +943,93 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
+
+  app.post(
+    "/api/realtime/session",
+    express.text({ type: ["application/sdp", "text/plain"], limit: "1mb" }),
+    async (request, response, next) => {
+      try {
+        if (!config.openAiRealtimeEnabled) {
+          response.status(503).json({ ok: false, error: "Realtime is disabled." });
+          return;
+        }
+
+        if (!config.openAiApiKey) {
+          response.status(503).json({
+            ok: false,
+            error: "OpenAI API key is not configured.",
+          });
+          return;
+        }
+
+        const offerSdp = typeof request.body === "string" ? request.body : "";
+        if (!offerSdp.trim()) {
+          response.status(400).json({ ok: false, error: "SDP offer is required." });
+          return;
+        }
+
+        if (offerSdp.length > REALTIME_MAX_OFFER_SDP_CHARS) {
+          response.status(400).json({ ok: false, error: "SDP offer is too large." });
+          return;
+        }
+
+        const presetParam =
+          typeof request.query?.preset === "string" ? request.query.preset : "";
+        const preset = loadUserPresetById(presetParam);
+        const session = buildRealtimeSessionConfig(
+          config,
+          preset
+            ? { voice: preset.voice, instructions: preset.instructions }
+            : {}
+        );
+        const safetyId = createHash("sha256")
+          .update(`${hostname()}::portal-realtime`)
+          .digest("hex")
+          .slice(0, 32);
+
+        // Guarantee the trailing CRLF the SDP parser requires, in case any hop
+        // stripped it ("failed to unmarshal SDP: EOF").
+        const sdpForOpenAi = offerSdp.endsWith("\n") ? offerSdp : `${offerSdp}\r\n`;
+
+        const formData = new FormData();
+        formData.set("sdp", sdpForOpenAi);
+        formData.set("session", JSON.stringify(session));
+
+        const openAiResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.openAiApiKey}`,
+            "OpenAI-Safety-Identifier": safetyId,
+          },
+          body: formData,
+        });
+
+        if (!openAiResponse.ok) {
+          const errorText = await openAiResponse.text().catch(() => "");
+          // The OpenAI validation body (e.g. "unknown parameter") is needed to
+          // diagnose 4xx rejections; it contains no secrets.
+          console.error(
+            "[/api/realtime/session] OpenAI error:",
+            openAiResponse.status,
+            errorText
+          );
+          response.status(502).json({
+            ok: false,
+            error: "Realtime session failed.",
+            detail: extractRealtimeErrorDetail(errorText, openAiResponse.status),
+          });
+          return;
+        }
+
+        const answerSdp = await openAiResponse.text();
+        response.setHeader("Content-Type", "application/sdp");
+        response.send(answerSdp);
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
   app.use("/vendor/lucide", express.static(lucideDirectory));
   app.use(express.static(publicDirectory));
 
@@ -761,6 +1345,90 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
     }
   });
 
+  // Send an email via Microsoft Graph. The assistant only stages a draft; the
+  // actual send is a user-confirmed action that hits this route. Returns minimal
+  // metadata (message id + status) and never exposes tokens.
+  app.post("/api/email/send", async (request, response, next) => {
+    try {
+      if (!config.graphMailSendEnabled) {
+        response.status(503).json({
+          ok: false,
+          error:
+            "Email sending is disabled. Set GRAPH_MAIL_SEND_ENABLED=true and grant Mail.Send + Mail.ReadWrite.",
+        });
+        return;
+      }
+
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      const parsed = parseEmailSendRequest(request.body);
+      if (parsed.error) {
+        response.status(400).json({ ok: false, error: parsed.error });
+        return;
+      }
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      const auditBase = {
+        ts: new Date().toISOString(),
+        to: parsed.to,
+        cc: parsed.cc,
+        subject: parsed.subject,
+        bodyType: parsed.bodyType,
+        bodyChars: parsed.body.length,
+        attachments: parsed.attachments.map((file) => ({ name: file.name, bytes: file.bytes })),
+      };
+
+      let draft;
+      try {
+        // Draft-then-send so we can return a real message id.
+        draft = await createDraftMessage(token, buildGraphDraftInput(parsed));
+        await sendDraftMessage(token, draft.id);
+      } catch (graphError) {
+        const status = Number(graphError?.status) || 502;
+        const detail = graphError?.graphMessage || graphError?.message || "Graph send failed.";
+        logEmailSend({ ...auditBase, status: "failed", error: detail });
+        if (status === 403) {
+          response.status(403).json({
+            ok: false,
+            error:
+              "Microsoft Graph rejected the send. The signed-in account is likely missing the Mail.Send permission.",
+            detail,
+          });
+          return;
+        }
+        response.status(502).json({ ok: false, error: "Failed to send email.", detail });
+        return;
+      }
+
+      logEmailSend({ ...auditBase, status: "sent", messageId: draft.id });
+      console.log(
+        `[/api/email/send] sent to=${parsed.to.length} cc=${parsed.cc.length} subject="${parsed.subject}" id=${draft.id}`
+      );
+
+      response.json({
+        ok: true,
+        status: "sent",
+        messageId: draft.id,
+        webLink: draft.webLink ?? null,
+        to: parsed.to,
+        cc: parsed.cc,
+        subject: parsed.subject,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/item/research", async (request, response, next) => {
     try {
       const canUseSourcebot = Boolean(sourcebotService?.enabled);
@@ -804,6 +1472,33 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       });
     } catch (error) {
       console.error("[/api/item/research]", error);
+      next(error);
+    }
+  });
+
+  app.post("/api/docs/search", async (request, response, next) => {
+    try {
+      if (!docsKbService?.describe?.()?.enabled) {
+        response.status(503).json({ ok: false, error: "Docs knowledge base is not configured." });
+        return;
+      }
+
+      const query = typeof request.body?.query === "string" ? request.body.query.trim() : "";
+      if (!query) {
+        response.status(400).json({ ok: false, error: "query is required." });
+        return;
+      }
+
+      const chunks = await docsKbService.search(query);
+      const results = (Array.isArray(chunks) ? chunks : []).map((chunk) => ({
+        doc: chunk?.docPath ?? null,
+        heading: chunk?.heading ?? null,
+        text: typeof chunk?.text === "string" ? chunk.text.slice(0, 1200) : "",
+      }));
+
+      response.json({ ok: true, results });
+    } catch (error) {
+      console.error("[/api/docs/search]", error);
       next(error);
     }
   });
@@ -1015,7 +1710,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
   });
 
   // ── User preset persistence (file-backed, survives browser clears) ──────────
-  const userPresetsFile = fileURLToPath(new URL("../../user-data/tts-presets.json", import.meta.url));
+  const userPresetsFile = USER_PRESETS_FILE;
 
   app.get("/api/tts/presets", (_request, response) => {
     try {

@@ -12,7 +12,7 @@
  *
  * Set before running:
  *   GRAPH_TENANT_ID, GRAPH_CLIENT_ID, GRAPH_REDIRECT_URI
- *   GRAPH_CLIENT_SECRET (prefer a Windows user environment variable)
+ *   GRAPH_CLIENT_SECRET
  */
 
 import "dotenv/config";
@@ -45,7 +45,7 @@ if (!authCfg.tenantId || !authCfg.clientId || !authCfg.clientSecret) {
     "\nERROR: Missing Graph credentials. Set these values before running:\n" +
     "  GRAPH_TENANT_ID\n" +
     "  GRAPH_CLIENT_ID\n" +
-    "  GRAPH_CLIENT_SECRET (prefer a Windows user environment variable)\n"
+    "  GRAPH_CLIENT_SECRET\n"
   );
   process.exit(1);
 }

@@ -5,6 +5,7 @@ export function buildConfig(overrides = {}) {
   // once via AI_PROVIDER in .env (openai | teamgpt). Per-feature vars
   // (PARSER_PROVIDER, SUMMARY_PROVIDER, ASK_PROVIDER) override it when set.
   const defaultAiProvider = normalizeAiProvider(process.env.AI_PROVIDER, "openai");
+  const openAiModel = process.env.OPENAI_MODEL || "merlin";
   const baseConfig = {
     host: process.env.SERVER_HOST || "127.0.0.1",
     port: Number.parseInt(process.env.PORT || "3000", 10),
@@ -65,8 +66,24 @@ export function buildConfig(overrides = {}) {
     ),
     openAiEnabled: process.env.OPENAI_ENABLED === "true",
     openAiApiKey: process.env.OPENAI_API_KEY || "",
-    openAiModel: process.env.OPENAI_MODEL || "gpt-5.4-mini",
+    openAiModel,
     openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
+    openAiRealtimeEnabled: process.env.OPENAI_REALTIME_ENABLED === "true",
+    openAiRealtimeModel: process.env.OPENAI_REALTIME_MODEL || openAiModel,
+    openAiRealtimeVoice: process.env.OPENAI_REALTIME_VOICE || "marin",
+    openAiRealtimeReasoningEffort:
+      process.env.OPENAI_REALTIME_REASONING_EFFORT || "medium",
+    openAiRealtimeMaxOutputTokens: Number.parseInt(
+      process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS || "900",
+      10
+    ),
+    // Pin transcription language (ISO-639-1) to stop the transcriber from
+    // hallucinating foreign-language phrases on silence/noise. "auto" = detect.
+    openAiRealtimeTranscribeLanguage:
+      process.env.OPENAI_REALTIME_TRANSCRIBE_LANGUAGE || "en",
+    // Input noise reduction: near_field (headset/close mic), far_field, or off.
+    openAiRealtimeNoiseReduction:
+      process.env.OPENAI_REALTIME_NOISE_REDUCTION || "near_field",
     summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, defaultAiProvider),
     askProvider: normalizeAiProvider(process.env.ASK_PROVIDER, defaultAiProvider),
     parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, defaultAiProvider),
@@ -113,8 +130,12 @@ export function buildConfig(overrides = {}) {
     graphTenantId:      process.env.GRAPH_TENANT_ID      || "",
     graphClientId:      process.env.GRAPH_CLIENT_ID      || "",
     graphClientSecret:  process.env.GRAPH_CLIENT_SECRET  || "",
-    graphRedirectUri:   process.env.GRAPH_REDIRECT_URI   || "http://localhost:3069/auth/redirect",
+    //graphRedirectUri:   process.env.GRAPH_REDIRECT_URI   || "http://localhost:3069/auth/redirect",
+    graphRedirectUri:   "https://login.microsoftonline.com/common/oauth2/nativeclient",
     graphScopes:        (process.env.GRAPH_SCOPES || "User.Read Mail.Read Calendars.Read offline_access").split(" ").filter(Boolean),
+    // Outbound email is an outward-facing action: off unless explicitly enabled,
+    // and still requires Mail.Send + Mail.ReadWrite in GRAPH_SCOPES and the token.
+    graphMailSendEnabled: process.env.GRAPH_MAIL_SEND_ENABLED === "true",
     graphTokenCacheFile: process.env.GRAPH_TOKEN_CACHE_FILE || ".local-auth/graph-tester-token.json",
     teamGptTokenCacheFile: process.env.TEAMGPT_TOKEN_CACHE_FILE || ".local-auth/teamgpt-token.json"
   };
