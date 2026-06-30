@@ -4,6 +4,12 @@ import {
   createRealtimeFxGraph,
   type RealtimeVoiceFxSettings,
 } from "./realtimeVoiceFx";
+import {
+  createMicCleanup,
+  type MicCleanupController,
+  type MicCleanupDebug,
+  type MicCleanupSettings,
+} from "./micCleanup";
 
 export type RealtimeAssistantStatus =
   | "idle"
@@ -30,6 +36,13 @@ interface RealtimeAssistantOptions {
   getPresetId?: () => string | null;
   /** Resolves the active preset's FX (approximated on the live stream via Web Audio). */
   getVoiceFx?: () => RealtimeVoiceFxSettings | null;
+  /**
+   * Resolves the mic-cleanup settings at connect time. Return null to skip the
+   * cleanup pipeline and use the raw microphone (legacy behavior).
+   */
+  getMicSettings?: () => MicCleanupSettings | null;
+  /** Throttled mic-cleanup debug snapshot (volume, gate, speaking, ...). */
+  onMicDebug?: (debug: MicCleanupDebug) => void;
 }
 
 export interface RealtimeAssistantClient {
@@ -40,6 +53,8 @@ export interface RealtimeAssistantClient {
   sendTextMessage(text: string): void;
   sendContextUpdate(contextObj: unknown): void;
   sendSystemNote(note: string): void;
+  /** Apply mic-cleanup setting changes to the live session (gate/timings). */
+  updateMicSettings(settings: Partial<MicCleanupSettings>): void;
 }
 
 export function createRealtimeAssistant(
@@ -52,6 +67,7 @@ export function createRealtimeAssistant(
   let audioContext: AudioContext | null = null;
   let manualDisconnect = false;
   let toolCallsInFlight = 0;
+  let micCleanup: MicCleanupController | null = null;
   const processedToolCalls = new Set<string>();
   const streamedFunctionArgs = new Map<string, string>();
   const transcriptBuffers = new Map<string, string>();
@@ -61,7 +77,35 @@ export function createRealtimeAssistant(
     manualDisconnect = false;
 
     try {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Acquire the mic through the cleanup pipeline (native suppression +
+      // software noise gate + silence detection) so background noise doesn't
+      // reach the assistant. Fall back to the raw mic if cleanup can't start.
+      const micSettings = opts.getMicSettings?.() ?? null;
+      if (micSettings) {
+        try {
+          micCleanup = createMicCleanup(
+            {
+              onDebug: (debug) => opts.onMicDebug?.(debug),
+              onError: (error) => opts.onError?.(error.message),
+            },
+            micSettings
+          );
+          localStream = await micCleanup.start();
+        } catch (micError) {
+          // Cleanup failed (permissions, unsupported API): use the raw mic so
+          // the assistant still works.
+          micCleanup = null;
+          opts.onError?.(
+            micError instanceof Error
+              ? `Mic cleanup unavailable, using raw microphone: ${micError.message}`
+              : "Mic cleanup unavailable, using raw microphone."
+          );
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+      } else {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+
       audioElement = document.createElement("audio");
       audioElement.autoplay = true;
 
@@ -182,7 +226,12 @@ export function createRealtimeAssistant(
       peerConnection = null;
     }
 
-    if (localStream) {
+    if (micCleanup) {
+      // Stops raw mic + processed tracks, disconnects nodes, closes its context.
+      micCleanup.stop();
+      micCleanup = null;
+      localStream = null;
+    } else if (localStream) {
       for (const track of localStream.getTracks()) {
         track.stop();
       }
@@ -245,15 +294,29 @@ export function createRealtimeAssistant(
   }
 
   function mute() {
+    // Mute at the mic source when cleanup is active so the gate/analyser also
+    // see silence; otherwise toggle the outbound track directly.
+    if (micCleanup) {
+      micCleanup.mute();
+      return;
+    }
     for (const track of localStream?.getAudioTracks() ?? []) {
       track.enabled = false;
     }
   }
 
   function unmute() {
+    if (micCleanup) {
+      micCleanup.unmute();
+      return;
+    }
     for (const track of localStream?.getAudioTracks() ?? []) {
       track.enabled = true;
     }
+  }
+
+  function updateMicSettings(settings: Partial<MicCleanupSettings>) {
+    micCleanup?.updateSettings(settings);
   }
 
   function sendTextMessage(text: string) {
@@ -548,6 +611,7 @@ export function createRealtimeAssistant(
     sendTextMessage,
     sendContextUpdate,
     sendSystemNote,
+    updateMicSettings,
   };
 }
 

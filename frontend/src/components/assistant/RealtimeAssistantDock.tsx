@@ -13,6 +13,7 @@ import {
   Phone,
   PhoneOff,
   Send,
+  SlidersHorizontal,
   Trash2,
   Waves,
   X,
@@ -27,6 +28,10 @@ import {
   type EmailSendStatus,
   type PendingEmail,
 } from "@/hooks/useRealtimeAssistant";
+import type {
+  MicCleanupDebug,
+  MicCleanupSettings,
+} from "@/lib/micCleanup";
 import type { DashboardCardItem, DashboardResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +69,7 @@ export function RealtimeAssistantDock({
   refresh,
 }: RealtimeAssistantDockProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showMicPanel, setShowMicPanel] = useState(false);
   const [draft, setDraft] = useState("");
   const [manualBotState, setManualBotState] = useState<GennyBotState | null>(null);
   const [dismissedErrorSignal, setDismissedErrorSignal] = useState<string | null>(null);
@@ -87,6 +93,11 @@ export function RealtimeAssistantDock({
     connect,
     disconnect,
     toggleMute,
+    micSettings,
+    micDebug,
+    updateMicSettings,
+    testMic,
+    isMicTesting,
     sendText,
     clearConversation,
   } = useRealtimeAssistant({
@@ -308,6 +319,36 @@ export function RealtimeAssistantDock({
                   ? "Applies on your next session. Voice, persona, and approximated effects are inherited; pitch/tempo aren't applied to the live voice."
                   : "Inherits the preset's voice, persona, and approximated effects (EQ, compression, reverb, volume). Pitch/tempo can't be applied to the live voice."}
               </p>
+            </div>
+
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setShowMicPanel((value) => !value)}
+                className="flex w-full items-center justify-between rounded-2xl border border-slate-700/80 bg-slate-950/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400 transition-colors hover:border-cyan-500/40 hover:text-slate-200"
+              >
+                <span className="flex items-center gap-2">
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Mic cleanup
+                </span>
+                <span className="flex items-center gap-2 normal-case tracking-normal text-slate-500">
+                  {micDebug?.speaking ? (
+                    <span className="text-emerald-300">speaking</span>
+                  ) : micDebug?.gateOpen ? (
+                    <span className="text-cyan-300">open</span>
+                  ) : null}
+                  {showMicPanel ? "−" : "+"}
+                </span>
+              </button>
+              {showMicPanel && (
+                <MicCleanupPanel
+                  settings={micSettings}
+                  debug={micDebug}
+                  isTesting={isMicTesting}
+                  onChange={updateMicSettings}
+                  onTest={() => void testMic()}
+                />
+              )}
             </div>
           </div>
 
@@ -607,6 +648,207 @@ function EmailConfirmation({
         Review carefully — this sends a real email from your mailbox via Microsoft Graph.
       </p>
     </div>
+  );
+}
+
+// Display scale for the volume meter. Speech RMS typically peaks well under
+// this, so it keeps the bar readable without clipping at the top.
+const MIC_VOLUME_SCALE = 0.3;
+
+function MicCleanupPanel({
+  settings,
+  debug,
+  isTesting,
+  onChange,
+  onTest,
+}: {
+  settings: MicCleanupSettings;
+  debug: MicCleanupDebug | null;
+  isTesting: boolean;
+  onChange: (partial: Partial<MicCleanupSettings>) => void;
+  onTest: () => void;
+}) {
+  const volume = debug?.volume ?? 0;
+  const volumePct = Math.min(100, (volume / MIC_VOLUME_SCALE) * 100);
+  const thresholdPct = Math.min(
+    100,
+    (settings.noiseGateThreshold / MIC_VOLUME_SCALE) * 100
+  );
+  const speaking = debug?.speaking ?? false;
+  const gateOpen = debug?.gateOpen ?? false;
+
+  return (
+    <div className="mt-2 space-y-3 rounded-2xl border border-slate-800/80 bg-slate-950/45 p-3">
+      {/* Live volume meter with a marker showing the noise-gate threshold. */}
+      <div>
+        <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+          <span>Input level</span>
+          <span className="tabular-nums">{volume.toFixed(3)}</span>
+        </div>
+        <div className="relative h-3 overflow-hidden rounded-full bg-slate-800/80">
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width] duration-75",
+              gateOpen ? "bg-emerald-400" : "bg-slate-500"
+            )}
+            style={{ width: `${volumePct}%` }}
+          />
+          {/* Threshold marker */}
+          <div
+            className="absolute top-0 h-full w-0.5 bg-amber-300"
+            style={{ left: `${thresholdPct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Live state readout (also serves as dev debug). */}
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-400">
+        <DebugRow label="Gate" value={gateOpen ? "open" : "closed"} accent={gateOpen} />
+        <DebugRow label="Speaking" value={speaking ? "yes" : "no"} accent={speaking} />
+        <DebugRow label="Threshold" value={settings.noiseGateThreshold.toFixed(3)} />
+        <DebugRow label="Ignored noise" value={String(debug?.ignoredNoiseCount ?? 0)} />
+      </div>
+
+      {/* Live-tunable gate / timing settings. */}
+      <RangeRow
+        label="Noise gate threshold"
+        value={settings.noiseGateThreshold}
+        min={0.001}
+        max={0.1}
+        step={0.001}
+        format={(v) => v.toFixed(3)}
+        onChange={(v) => onChange({ noiseGateThreshold: v })}
+      />
+      <RangeRow
+        label="Silence stop delay"
+        value={settings.endSilenceMs}
+        min={300}
+        max={3000}
+        step={50}
+        format={(v) => `${v} ms`}
+        onChange={(v) => onChange({ endSilenceMs: v })}
+      />
+      <RangeRow
+        label="Max utterance length"
+        value={settings.maxUtteranceMs}
+        min={5000}
+        max={60000}
+        step={1000}
+        format={(v) => `${Math.round(v / 1000)} s`}
+        onChange={(v) => onChange({ maxUtteranceMs: v })}
+      />
+
+      {/* Native browser cleanup toggles (apply on the next session). */}
+      <div className="space-y-1.5 border-t border-slate-800/70 pt-2">
+        <ToggleRow
+          label="Noise suppression"
+          checked={settings.noiseSuppression}
+          onChange={(v) => onChange({ noiseSuppression: v })}
+        />
+        <ToggleRow
+          label="Auto gain control"
+          checked={settings.autoGainControl}
+          onChange={(v) => onChange({ autoGainControl: v })}
+        />
+        <ToggleRow
+          label="Echo cancellation"
+          checked={settings.echoCancellation}
+          onChange={(v) => onChange({ echoCancellation: v })}
+        />
+        <p className="text-[10px] text-slate-500">
+          Browser cleanup toggles apply when you start your next session.
+        </p>
+      </div>
+
+      <Button
+        variant="outline"
+        onClick={onTest}
+        className={cn(
+          "w-full rounded-full border-slate-700/80 bg-slate-950/35 text-slate-200 hover:border-cyan-500/40 hover:bg-slate-900",
+          isTesting && "border-emerald-500/50 bg-emerald-500/10 text-emerald-100"
+        )}
+      >
+        <Mic className="h-4 w-4" />
+        {isTesting ? "Stop mic test" : "Test microphone"}
+      </Button>
+    </div>
+  );
+}
+
+function DebugRow({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span>{label}</span>
+      <span className={cn("tabular-nums", accent ? "text-emerald-300" : "text-slate-200")}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function RangeRow({
+  label,
+  value,
+  min,
+  max,
+  step,
+  format,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (value: number) => string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-[11px] text-slate-400">
+        <span>{label}</span>
+        <span className="tabular-nums text-slate-200">{format(value)}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="w-full accent-cyan-400"
+      />
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between text-[11px] text-slate-300">
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-3.5 w-3.5 accent-cyan-400"
+      />
+    </label>
   );
 }
 

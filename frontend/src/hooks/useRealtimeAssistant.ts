@@ -12,6 +12,12 @@ import { readLocal, writeLocal } from "@/lib/storage";
 import { DEFAULT_FX } from "@/lib/voiceFx";
 import type { RealtimeVoiceFxSettings } from "@/lib/realtimeVoiceFx";
 import {
+  createMicCleanup,
+  DEFAULT_MIC_CLEANUP_SETTINGS,
+  type MicCleanupDebug,
+  type MicCleanupSettings,
+} from "@/lib/micCleanup";
+import {
   buildRealtimeContext,
   type RealtimeContextPayload,
 } from "@/lib/realtimeContext";
@@ -64,6 +70,7 @@ export type EmailSendStatus =
   | { state: "error"; message: string };
 
 const REALTIME_PRESET_KEY = "realtime-preset-id";
+const MIC_CLEANUP_SETTINGS_KEY = "realtime-mic-cleanup-settings";
 const EMAIL_MAX_ATTACHMENTS = 5;
 const EMAIL_MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
@@ -101,6 +108,15 @@ interface SendEmailToolArgs {
   body?: unknown;
 }
 
+interface SearchToolArgs {
+  query?: unknown;
+  limit?: unknown;
+}
+
+interface RecentEmailsToolArgs {
+  limit?: unknown;
+}
+
 export function useRealtimeAssistant({
   items,
   summary,
@@ -131,6 +147,19 @@ export function useRealtimeAssistant({
   const presetFxRef = useRef<Map<string, RealtimeVoiceFxSettings>>(new Map());
   const [pendingEmail, setPendingEmail] = useState<PendingEmail | null>(null);
   const [emailStatus, setEmailStatus] = useState<EmailSendStatus>({ state: "idle" });
+  const [micSettings, setMicSettings] = useState<MicCleanupSettings>(() => ({
+    ...DEFAULT_MIC_CLEANUP_SETTINGS,
+    ...(readLocal<Partial<MicCleanupSettings>>(MIC_CLEANUP_SETTINGS_KEY) ?? {}),
+  }));
+  const micSettingsRef = useRef(micSettings);
+  const [micDebug, setMicDebug] = useState<MicCleanupDebug | null>(null);
+  const [isMicTesting, setIsMicTesting] = useState(false);
+  // Standalone cleanup instance used only by the "Test microphone" button.
+  const micTestRef = useRef<ReturnType<typeof createMicCleanup> | null>(null);
+
+  useEffect(() => {
+    micSettingsRef.current = micSettings;
+  }, [micSettings]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -217,6 +246,10 @@ export function useRealtimeAssistant({
     setActiveToolName(toolName ? formatToolLabel(toolName) : null);
   });
 
+  const handleMicDebug = useEffectEvent((debug: MicCleanupDebug) => {
+    setMicDebug(debug);
+  });
+
   const handleTranscript = useEffectEvent((event: RealtimeTranscriptEvent) => {
     setMessages((current) => upsertRealtimeMessage(current, event));
   });
@@ -238,6 +271,12 @@ export function useRealtimeAssistant({
           return runSearchDocs(args as DocsToolArgs);
         case "send_email":
           return runSendEmail(args as SendEmailToolArgs);
+        case "search_emails":
+          return runSearchEmails(args as SearchToolArgs);
+        case "search_chats":
+          return runSearchChats(args as SearchToolArgs);
+        case "get_recent_emails":
+          return runGetRecentEmails(args as RecentEmailsToolArgs);
         default:
           return { ok: false, error: `Unknown tool: ${toolName}` };
       }
@@ -260,6 +299,8 @@ export function useRealtimeAssistant({
     return () => {
       clientRef.current?.disconnect();
       clientRef.current = null;
+      micTestRef.current?.stop();
+      micTestRef.current = null;
     };
   }, []);
 
@@ -281,6 +322,8 @@ export function useRealtimeAssistant({
         const id = presetIdRef.current;
         return id ? presetFxRef.current.get(id) ?? null : null;
       },
+      getMicSettings: () => micSettingsRef.current,
+      onMicDebug: handleMicDebug,
     });
 
     clientRef.current = client;
@@ -310,6 +353,7 @@ export function useRealtimeAssistant({
     setIsConnected(false);
     setIsMuted(false);
     setActiveToolName(null);
+    setMicDebug(null);
     setStatus("idle");
   }
 
@@ -327,6 +371,67 @@ export function useRealtimeAssistant({
 
     client.mute();
     setIsMuted(true);
+  }
+
+  // Merge + persist mic-cleanup settings. Gate/timing changes apply to the live
+  // session immediately; native-constraint toggles (echo/noise/AGC) take effect
+  // on the next session, since they require re-acquiring the microphone.
+  function updateMicSettings(partial: Partial<MicCleanupSettings>) {
+    setMicSettings((current) => {
+      const next = { ...current, ...partial };
+      micSettingsRef.current = next;
+      writeLocal(MIC_CLEANUP_SETTINGS_KEY, next);
+      clientRef.current?.updateMicSettings(partial);
+      micTestRef.current?.updateSettings(partial);
+      return next;
+    });
+  }
+
+  function stopMicTest() {
+    micTestRef.current?.stop();
+    micTestRef.current = null;
+    setIsMicTesting(false);
+    setMicDebug(null);
+  }
+
+  // Spin up a temporary cleanup instance (no WebRTC) so the user can check their
+  // mic and tune the threshold via the live meter without starting a session.
+  async function testMic(): Promise<boolean> {
+    if (micTestRef.current) {
+      stopMicTest();
+      return false;
+    }
+
+    try {
+      const tester = createMicCleanup(
+        {
+          onDebug: (debug) => setMicDebug(debug),
+          onError: (testError) => {
+            setError(testError.message);
+            stopMicTest();
+          },
+        },
+        micSettingsRef.current
+      );
+      await tester.start();
+      micTestRef.current = tester;
+      setIsMicTesting(true);
+
+      // Auto-stop the test after 15s so a forgotten mic doesn't stay open.
+      window.setTimeout(() => {
+        if (micTestRef.current === tester) {
+          stopMicTest();
+        }
+      }, 15000);
+      return true;
+    } catch (testError) {
+      setError(
+        testError instanceof Error
+          ? testError.message
+          : "Could not access the microphone."
+      );
+      return false;
+    }
   }
 
   function sendText(text: string) {
@@ -587,6 +692,86 @@ export function useRealtimeAssistant({
     };
   }
 
+  async function runSearchEmails({ query, limit }: SearchToolArgs) {
+    return runGraphSearch("/api/email/search", query, limit, "search_emails");
+  }
+
+  async function runSearchChats({ query, limit }: SearchToolArgs) {
+    return runGraphSearch("/api/chats/search", query, limit, "search_chats");
+  }
+
+  // List the most recent emails (date-ordered, newest first). Unlike the
+  // keyword search this needs no query, so it answers "what's my last email".
+  async function runGetRecentEmails({ limit }: RecentEmailsToolArgs) {
+    const parsedLimit =
+      typeof limit === "number" && Number.isFinite(limit) ? limit : undefined;
+
+    const response = await fetch("/api/email/recent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: parsedLimit }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response
+        .json()
+        .catch(() => ({ error: response.statusText }))) as { error?: string };
+      throw new Error(payload.error || response.statusText);
+    }
+
+    const payload = (await response.json()) as {
+      count?: number;
+      results?: unknown[];
+    };
+    const results = Array.isArray(payload.results) ? payload.results : [];
+
+    if (results.length === 0) {
+      return { ok: true, count: 0, results: [], note: "No recent emails found." };
+    }
+
+    return { ok: true, count: payload.count ?? results.length, results };
+  }
+
+  async function runGraphSearch(
+    path: string,
+    query: unknown,
+    limit: unknown,
+    toolName: string
+  ) {
+    const normalizedQuery = normalizeText(query);
+    if (!normalizedQuery) {
+      return { ok: false, error: `${toolName} requires a query.` };
+    }
+
+    const parsedLimit =
+      typeof limit === "number" && Number.isFinite(limit) ? limit : undefined;
+
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: normalizedQuery, limit: parsedLimit }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response
+        .json()
+        .catch(() => ({ error: response.statusText }))) as { error?: string };
+      throw new Error(payload.error || response.statusText);
+    }
+
+    const payload = (await response.json()) as {
+      count?: number;
+      results?: unknown[];
+    };
+    const results = Array.isArray(payload.results) ? payload.results : [];
+
+    if (results.length === 0) {
+      return { ok: true, count: 0, results: [], note: "No matches found." };
+    }
+
+    return { ok: true, count: payload.count ?? results.length, results };
+  }
+
   async function runSendEmail({ to, cc, subject, body }: SendEmailToolArgs) {
     const recipients = normalizeEmailRecipients(to);
     const ccRecipients = normalizeEmailRecipients(cc);
@@ -779,6 +964,11 @@ export function useRealtimeAssistant({
     connect,
     disconnect,
     toggleMute,
+    micSettings,
+    micDebug,
+    updateMicSettings,
+    testMic,
+    isMicTesting,
     sendText,
     sendDashboardContext,
     clearConversation,
@@ -830,6 +1020,14 @@ function formatToolLabel(toolName: string) {
       return "Reviewing portal context...";
     case "search_docs":
       return "Searching documentation...";
+    case "search_emails":
+      return "Searching email...";
+    case "get_recent_emails":
+      return "Checking recent email...";
+    case "search_chats":
+      return "Searching Teams chats...";
+    case "send_email":
+      return "Preparing email...";
     default:
       return "Running tool...";
   }

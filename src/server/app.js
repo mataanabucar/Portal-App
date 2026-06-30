@@ -22,7 +22,8 @@ import {
   parseTesterConfigQuery
 } from "./services/testerConfig.js";
 import { findItemEmail } from "./services/graph/services/itemEmailService.js";
-import { createDraftMessage, sendDraftMessage } from "./services/graph/services/mailService.js";
+import { createDraftMessage, sendDraftMessage, searchMyMessages, listInboxMessages } from "./services/graph/services/mailService.js";
+import { searchRecentChatMessages } from "./services/graph/services/teamsChatService.js";
 import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
 import { registerKbDebugRoutes } from "./services/kb/debugRoutes.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
@@ -452,7 +453,8 @@ function buildRealtimeAssistantInstructions(hasPersona = false) {
     "Use that knowledge freely: explain concepts, help debug code and errors, brainstorm, draft and rewrite text, do analysis, and reason through problems like a sharp, knowledgeable colleague.",
     "Never claim you lack knowledge or can 'only use portal tools' — you have full general knowledge in addition to the live portal context and tools.",
     "On top of that, you have live access to Mataan's portal work queue: the dashboard context provided to you in this session, plus read-only tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question, search_docs).",
-    "Use the provided dashboard context and these tools whenever a question is about his specific queue items, statuses, due dates, blockers, research findings, or email context.",
+    "You can independently access Mataan's Microsoft 365: use search_emails for keyword/phrase Outlook searches, get_recent_emails for his latest/newest/most-recent messages (date-ordered, no keyword needed — use this for 'what's my last email'), and search_chats for Teams chat messages by keyword, person, or topic. These tools reach his entire mailbox and Teams history directly via Microsoft Graph and are COMPLETELY INDEPENDENT of the portal work queue — use them whenever he asks to find, recall, or look up an email or chat, even when it has nothing to do with the portal. Never tie an email or chat lookup to the portal queue unless he explicitly asks about a specific portal item. Summarize the hits (sender, date, subject/snippet) rather than guessing.",
+    "Use the dashboard context and the portal queue tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question) ONLY when a question is about his specific portal queue items — their statuses, due dates, blockers, research findings, or an individual item's email context. Do not route general email or chat searches through the portal.",
     "You also have a documentation knowledge base of Mataan's own systems (ATS and calendar: backend/frontend architecture, database schemas, table relationships, design notes). When asked how those systems work, call search_docs to pull the relevant excerpts and answer from them; do not say you lack access to his documentation.",
     "Grounding rule applies ONLY to portal-specific facts (a particular item's status, ID, owner, due date, blockers, research results): rely on the provided context or a tool rather than guessing, and if you don't have it, say so or offer to fetch it.",
     "For everything else — general knowledge, explanations, debugging, advice, drafting — just answer directly from your own expertise.",
@@ -600,6 +602,65 @@ const REALTIME_TOOLS = [
         },
       },
       required: ["to", "subject", "body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "search_emails",
+    description:
+      "Search Mataan's Outlook mailbox by keyword or phrase and return matching messages (subject, sender, date, snippet). Use this when he asks to find, recall, or look up an email, or what someone sent about a topic. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Keywords, sender name, or phrase to search the mailbox for.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of results (default 10, max 25).",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "get_recent_emails",
+    description:
+      "List Mataan's most recent Outlook emails in date order (newest first) with sender, date, subject, read state, and a snippet. Use this for time-based questions — his latest, newest, last, or most recent email(s), or 'what just came in' / 'any new mail' — where there is no keyword to search. For 'the last email' use limit 1. Read-only, and independent of the portal queue.",
+    parameters: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "number",
+          description: "How many recent messages to return (default 10, max 25). Use 1 for the single latest email.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "search_chats",
+    description:
+      "Search Mataan's recent Microsoft Teams chat messages by keyword or phrase and return matching messages (sender, date, snippet). Covers recent messages across his most active chats, not full history. Use this when he asks to find or recall something said in Teams chats. Read-only.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Keywords, person, or phrase to search Teams chats for.",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of results (default 10, max 25).",
+        },
+      },
+      required: ["query"],
       additionalProperties: false,
     },
   },
@@ -933,6 +994,42 @@ function logEmailSend(entry) {
     console.error("[/api/email/send] failed to append audit log:", error.message);
   }
 }
+
+// ── Mail / chat search helpers (/api/email/search, /api/chats/search) ────────
+
+function normalizeSearchLimit(value, fallback = 10, max = 25) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(1, parsed));
+}
+
+function stripGraphHighlights(text) {
+  return String(text ?? "")
+    .replace(/<\/?c\d+>/g, "") // Search API highlight markers (<c0>…</c0>)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function shapeEmailSearchResult(message) {
+  return {
+    id: message.id,
+    subject: message.subject || "(no subject)",
+    from:
+      message.from?.emailAddress?.name ||
+      message.from?.emailAddress?.address ||
+      "Unknown sender",
+    date: message.receivedDateTime || null,
+    isRead: message.isRead ?? null,
+    snippet: stripGraphHighlights(message.bodyPreview).slice(0, 300),
+    webLink: message.webLink || null,
+  };
+}
+
 
 const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
@@ -1424,6 +1521,156 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         cc: parsed.cc,
         subject: parsed.subject,
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Read-only mailbox search (assistant tool: search_emails).
+  app.post("/api/email/search", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      const query = typeof request.body?.query === "string" ? request.body.query.trim() : "";
+      if (!query) {
+        response.status(400).json({ ok: false, error: "A search query is required." });
+        return;
+      }
+      const limit = normalizeSearchLimit(request.body?.limit);
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      let messages;
+      try {
+        messages = await searchMyMessages(token, query, {
+          top: limit,
+          select: "id,subject,from,receivedDateTime,bodyPreview,isRead,webLink",
+        });
+      } catch (graphError) {
+        const status = Number(graphError?.status) || 502;
+        const detail = graphError?.graphMessage || graphError?.message || "Graph search failed.";
+        response.status(status === 403 ? 403 : 502).json({
+          ok: false,
+          error:
+            status === 403
+              ? "Microsoft Graph rejected the search (the account may be missing Mail.Read)."
+              : "Email search failed.",
+          detail,
+        });
+        return;
+      }
+
+      const results = (Array.isArray(messages) ? messages : [])
+        .slice(0, limit)
+        .map(shapeEmailSearchResult);
+      response.json({ ok: true, count: results.length, results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Read-only "most recent messages" (assistant tool: get_recent_emails).
+  // Unlike /api/email/search (keyword $search), this lists the latest inbox
+  // messages ordered by received date, so the assistant can answer questions
+  // like "what's my last/newest email" that have no search keyword.
+  app.post("/api/email/recent", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      const limit = normalizeSearchLimit(request.body?.limit);
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      let messages;
+      try {
+        messages = await listInboxMessages(token, {
+          top: limit,
+          select: "id,subject,from,receivedDateTime,bodyPreview,isRead,webLink",
+          orderby: "receivedDateTime desc",
+        });
+      } catch (graphError) {
+        const status = Number(graphError?.status) || 502;
+        const detail = graphError?.graphMessage || graphError?.message || "Graph request failed.";
+        response.status(status === 403 ? 403 : 502).json({
+          ok: false,
+          error:
+            status === 403
+              ? "Microsoft Graph rejected the request (the account may be missing Mail.Read)."
+              : "Could not list recent emails.",
+          detail,
+        });
+        return;
+      }
+
+      const results = (Array.isArray(messages) ? messages : [])
+        .slice(0, limit)
+        .map(shapeEmailSearchResult);
+      response.json({ ok: true, count: results.length, results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Read-only Teams chat search (assistant tool: search_chats).
+  app.post("/api/chats/search", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      const query = typeof request.body?.query === "string" ? request.body.query.trim() : "";
+      if (!query) {
+        response.status(400).json({ ok: false, error: "A search query is required." });
+        return;
+      }
+      const limit = normalizeSearchLimit(request.body?.limit);
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      let results;
+      try {
+        // Chat.Read-only scan of recent chats (no admin consent required).
+        results = await searchRecentChatMessages(token, query, { limit });
+      } catch (graphError) {
+        const status = Number(graphError?.status) || 502;
+        const detail = graphError?.graphMessage || graphError?.message || "Graph search failed.";
+        response.status(status === 403 ? 403 : 502).json({
+          ok: false,
+          error:
+            status === 403
+              ? "Teams chat search was denied. The account needs at least Chat.Read."
+              : "Chat search failed.",
+          detail,
+        });
+        return;
+      }
+
+      response.json({ ok: true, count: results.length, results });
     } catch (error) {
       next(error);
     }

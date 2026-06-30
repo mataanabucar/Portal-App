@@ -13,6 +13,143 @@
 import { graphRequest, graphGetAllPages } from "../graphRequest.js";
 
 // ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+/**
+ * Full-text search across the signed-in user's Teams chat messages via the
+ * Microsoft Search API. Returns the raw search "hits" (each has a `summary`
+ * snippet and a `resource` chatMessage).
+ * @scope Chat.Read
+ */
+export async function searchChatMessages(token, queryString, { size = 20, from = 0 } = {}) {
+  const data = await graphRequest({
+    method: "POST",
+    path: "/search/query",
+    token,
+    body: {
+      requests: [
+        {
+          entityTypes: ["chatMessage"],
+          query: { queryString },
+          from,
+          size,
+        },
+      ],
+    },
+  });
+
+  const containers = data?.value?.[0]?.hitsContainers ?? [];
+  const hits = [];
+  for (const container of containers) {
+    for (const hit of container.hits ?? []) {
+      hits.push(hit);
+    }
+  }
+  return hits;
+}
+
+function stripChatHtml(text) {
+  return String(text ?? "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function listRecentChatsForSearch(token, top) {
+  // Prefer most-recently-active chats; fall back to a plain list if the
+  // ordered/expanded query is rejected.
+  try {
+    const data = await graphRequest({
+      method: "GET",
+      path: "/me/chats",
+      token,
+      query: {
+        $top: top,
+        $orderby: "lastMessagePreview/createdDateTime desc",
+        $expand: "lastMessagePreview",
+      },
+    });
+    return data?.value ?? [];
+  } catch {
+    const data = await graphRequest({
+      method: "GET",
+      path: "/me/chats",
+      token,
+      query: { $top: top },
+    });
+    return data?.value ?? [];
+  }
+}
+
+/**
+ * Chat.Read-only keyword search fallback: scans recent chats and filters their
+ * recent messages locally. No admin consent (avoids ChannelMessage.Read.All
+ * that the Search API requires), but limited to recent messages.
+ * Returns results already shaped for the client.
+ * @scope Chat.Read
+ */
+export async function searchRecentChatMessages(
+  token,
+  queryString,
+  { maxChats = 15, perChat = 25, limit = 10 } = {}
+) {
+  const needle = String(queryString ?? "").toLowerCase().trim();
+  if (!needle) {
+    return [];
+  }
+
+  const chats = await listRecentChatsForSearch(token, maxChats);
+
+  const perChatMatches = await Promise.all(
+    chats.map(async (chat) => {
+      try {
+        const data = await graphRequest({
+          method: "GET",
+          path: `/chats/${chat.id}/messages`,
+          token,
+          query: { $top: perChat },
+        });
+        const messages = data?.value ?? [];
+        const out = [];
+        for (const message of messages) {
+          // Skip system/event messages (joins, renames, etc.).
+          if (message?.messageType && message.messageType !== "message") {
+            continue;
+          }
+          const content = stripChatHtml(message?.body?.content);
+          if (!content || !content.toLowerCase().includes(needle)) {
+            continue;
+          }
+          out.push({
+            id: message.id || null,
+            chatId: chat.id || null,
+            topic: chat.topic || null,
+            from:
+              message.from?.user?.displayName ||
+              message.from?.application?.displayName ||
+              "Unknown sender",
+            date: message.createdDateTime || null,
+            snippet: content.slice(0, 300),
+          });
+        }
+        return out;
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  const matches = perChatMatches.flat();
+  matches.sort(
+    (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+  );
+  return matches.slice(0, limit);
+}
+
+// ---------------------------------------------------------------------------
 // Chats
 // ---------------------------------------------------------------------------
 
