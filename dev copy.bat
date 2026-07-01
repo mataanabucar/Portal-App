@@ -12,7 +12,7 @@ pushd "%SCRIPT_DIR%" || (
   exit /b 1
 )
 
-set PORTS=3000 3011 3069
+set PORTS=3000 3011 3069 3070
 
 for %%P in (%PORTS%) do (
   echo Checking port %%P...
