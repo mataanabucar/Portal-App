@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../src/loadEnv.js";
 import { spawn, spawnSync } from "node:child_process";
 import { buildGraphTesterConfig } from "../src/graph-tester/config.js";
 

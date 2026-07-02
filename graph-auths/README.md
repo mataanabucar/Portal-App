@@ -10,9 +10,9 @@ Small standalone app that does one thing:
 
 `<repo root>/.local-auth/graph-tester-token.json`
 
-This is the **same file** the main Portal app and the embedded graph-tester (port 3069) read and
+This is the same file the main Portal app and the embedded graph-tester (port 3069) read and
 auto-refresh. Writing here means a single login via this tool updates the token for the whole
-system — no manual file copying.
+system - no manual file copying.
 
 ## Run
 
@@ -31,7 +31,7 @@ registered in Azure.
 
 ## Config
 
-The app tries `graph-auths/.env` first and then falls back to the repo root `.env`.
+The app loads the repo root `.env` first and then applies any `graph-auths/.env` overrides on top.
 
 Use `GRAPH_AUTHS_*` variables for mini-app-specific overrides:
 
@@ -45,16 +45,26 @@ GRAPH_AUTHS_BROWSER_MODE=chrome-clean
 GRAPH_AUTHS_TENANT_ID=
 GRAPH_AUTHS_CLIENT_ID=
 GRAPH_AUTHS_CLIENT_SECRET=
-# GRAPH_AUTHS_SCOPES intentionally unset — inherits GRAPH_SCOPES from repo root .env
+# GRAPH_AUTHS_SCOPES intentionally unset - inherits GRAPH_SCOPES from repo root .env
 ```
 
 **Ports in this repo:**
-- `3000` — main Portal server
-- `3069` — embedded graph-tester (login UI built into the main app)
-- `3070` — this app (`graph-auths`)
+- `3000` - main Portal server
+- `3069` - embedded graph-tester (login UI built into the main app)
+- `3070` - this app (`graph-auths`)
 
 **Scopes:** Do not set `GRAPH_AUTHS_SCOPES`. The app falls through to `GRAPH_SCOPES` from the
 repo root `.env`, which is the single canonical scope list for all three tools.
+
+> The current startup path loads `.env` with override enabled, so the repo-local
+> Graph settings win over stale Windows user or machine `GRAPH_*` variables.
+> `graph-auths/.env` still wins over the repo root `.env` for mini-app-specific
+> overrides.
+
+> After changing `GRAPH_SCOPES` or `GRAPH_MAIL_SEND_ENABLED`, delete
+> `.local-auth/graph-tester-token.json` and log in again if you need a fresh
+> delegated token. The cached token keeps the old scope grant until a new login
+> or refresh replaces it. See `docs/graph-delegated-capabilities.md`.
 
 Browser mode values:
 

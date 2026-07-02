@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../loadEnv.js";
 import { fileURLToPath } from "node:url";
 import { createGraphTesterApp } from "./app.js";
 import { buildGraphTesterConfig } from "./config.js";

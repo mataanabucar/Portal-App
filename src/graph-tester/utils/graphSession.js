@@ -117,6 +117,7 @@ export function createGraphTesterAuthStore(config) {
 
     const claims = decodeTokenClaims(tokenSet.accessToken) || {};
     const delegated = isDelegatedToken(tokenSet.accessToken);
+    const tokenAppId = claims.appid || claims.azp || null;
     const grantedScopes = delegated
       ? getTokenScopes(tokenSet.accessToken)
       : tokenSet.scope?.split(" ").filter(Boolean) || [];
@@ -142,12 +143,21 @@ export function createGraphTesterAuthStore(config) {
       authReason: pendingAuth?.reason || null,
       lastAuthMethod,
       lastAuthAt,
+      // Identity guard: the token must have been minted for THIS app
+      // registration, never a Microsoft first-party client (Graph Explorer,
+      // Outlook Web, ...).
+      configClientId: config.graphClientId || null,
+      identityMatch: config.graphClientId
+        ? tokenAppId === config.graphClientId
+        : null,
       claims: {
         oid: claims.oid || null,
         tid: claims.tid || null,
         name: claims.name || null,
         preferredUsername:
           claims.preferred_username || claims.upn || claims.unique_name || null,
+        appId: tokenAppId,
+        appDisplayName: claims.app_displayname || null,
       },
     };
   }
@@ -260,6 +270,12 @@ export function createGraphTesterAuthStore(config) {
   async function getAccessToken() {
     await hydrateTokenSetFromDisk();
 
+    // A valid cached token always wins. An unfinished interactive login (a
+    // browser tab someone opened and abandoned) must never block runs.
+    if (tokenSet?.accessToken && !isTokenExpired(tokenSet.accessToken)) {
+      return tokenSet.accessToken;
+    }
+
     if (pendingAuth) {
       const pendingTokenSet = await pendingAuth.promise;
       return pendingTokenSet.accessToken;
@@ -271,10 +287,6 @@ export function createGraphTesterAuthStore(config) {
         "GraphAuthRequired",
         401
       );
-    }
-
-    if (!isTokenExpired(tokenSet.accessToken)) {
-      return tokenSet.accessToken;
     }
 
     if (tokenSet.refreshToken) {

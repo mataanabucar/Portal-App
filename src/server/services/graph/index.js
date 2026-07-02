@@ -36,6 +36,23 @@ export {
   isTokenExpired,
 } from "./tokenUtils.js";
 
+export {
+  DEFAULT_GRAPH_SCOPES,
+  parseDecodedTokenFile,
+  getClaimsFromRawJwtOrDecodedFile,
+  getDelegatedScopesFromClaims,
+  getAppRolesFromClaims,
+  sanitizeGraphScopes,
+  classifyScopes,
+  expandImpliedDelegatedScopes,
+  hasAnyScope,
+  hasAllScopes,
+  isFunctionEnabled,
+  getMissingScopes,
+  buildCapabilityReport,
+  summarizeTokenClaims,
+} from "./graphCapabilities.js";
+
 export { graphRequest, graphGetAllPages } from "./graphRequest.js";
 export { GraphError } from "./graphErrors.js";
 

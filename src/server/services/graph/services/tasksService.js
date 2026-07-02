@@ -76,3 +76,11 @@ export async function updateTask(token, listId, taskId, patch) {
     body: patch,
   });
 }
+
+/**
+ * Mark a task as completed (status patch).
+ * @scope Tasks.ReadWrite
+ */
+export async function completeTask(token, listId, taskId) {
+  return updateTask(token, listId, taskId, { status: "completed" });
+}

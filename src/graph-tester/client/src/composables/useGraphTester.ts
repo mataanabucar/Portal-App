@@ -2,6 +2,7 @@ import { computed, reactive } from "vue";
 import { graphTesterApi } from "@/api/graphTesterApi";
 import {
   GraphTesterRequestError,
+  type CapabilitiesResponse,
   type CatalogFunction,
   type CatalogService,
   type GraphTesterErrorPayload,
@@ -17,6 +18,8 @@ interface GraphTesterState {
   loading: boolean;
   startupError: string | null;
   catalog: CatalogService[];
+  capabilities: CapabilitiesResponse | null;
+  showUnavailable: boolean;
   health: HealthResponse | null;
   session: SessionResponse | null;
   selectedServiceKey: string;
@@ -30,6 +33,8 @@ const state = reactive<GraphTesterState>({
   loading: true,
   startupError: null,
   catalog: [],
+  capabilities: null,
+  showUnavailable: false,
   health: null,
   session: null,
   selectedServiceKey: "",
@@ -56,7 +61,27 @@ const totalFunctions = computed(() =>
   state.catalog.reduce((total, service) => total + service.functions.length, 0),
 );
 
-const canRun = computed(() => isAuthenticated.value && selectedEntry.value !== null && !state.running);
+const enabledFunctionCount = computed(
+  () => state.capabilities?.counts.enabled ?? totalFunctions.value,
+);
+
+const disabledFunctionCount = computed(() => state.capabilities?.counts.disabled ?? 0);
+
+// The server flags each catalog entry with enabled/missingScopes; disabled
+// entries are visible only via the toggle and can never be run.
+const selectedEntryEnabled = computed(() => selectedEntry.value?.enabled !== false);
+
+const identityMismatch = computed(
+  () => isAuthenticated.value && state.session?.identityMatch === false,
+);
+
+const canRun = computed(
+  () =>
+    isAuthenticated.value &&
+    selectedEntry.value !== null &&
+    selectedEntryEnabled.value &&
+    !state.running,
+);
 
 let listenersBound = false;
 
@@ -67,13 +92,14 @@ async function init(): Promise<void> {
   try {
     const [health, catalog, session] = await Promise.all([
       graphTesterApi.getHealth(),
-      graphTesterApi.getCatalog(),
+      graphTesterApi.getCatalog(state.showUnavailable),
       graphTesterApi.getSession(),
     ]);
 
     state.health = health;
     state.catalog = catalog.services || [];
     state.session = session;
+    void refreshCapabilities();
 
     const firstService = state.catalog[0];
     const firstFn = firstService?.functions[0];
@@ -116,10 +142,50 @@ function selectFunction(serviceKey: string, functionName: string): void {
 
 async function refreshSession(): Promise<void> {
   try {
+    const previouslyAuthenticated = state.session?.authenticated === true;
     state.session = await graphTesterApi.getSession();
+
+    // Catalog contents depend on the signed-in token's scopes — reload when
+    // the auth state flips (e.g. login completed in another window).
+    if (state.session.authenticated !== previouslyAuthenticated) {
+      await reloadCatalog();
+    }
   } catch {
     // Non-fatal: keep the last known session if a refresh blips.
   }
+}
+
+async function refreshCapabilities(): Promise<void> {
+  try {
+    state.capabilities = await graphTesterApi.getCapabilities();
+  } catch {
+    // Non-fatal: capabilities are informational.
+  }
+}
+
+async function reloadCatalog(): Promise<void> {
+  try {
+    const catalog = await graphTesterApi.getCatalog(state.showUnavailable);
+    state.catalog = catalog.services || [];
+    void refreshCapabilities();
+
+    const stillSelected = state.catalog
+      .find((service) => service.key === state.selectedServiceKey)
+      ?.functions.some((entry) => entry.functionName === state.selectedFunctionName);
+
+    if (!stillSelected) {
+      const firstService = state.catalog[0];
+      state.selectedServiceKey = firstService?.key || "";
+      state.selectedFunctionName = firstService?.functions[0]?.functionName || "";
+    }
+  } catch {
+    // Keep the previous catalog on transient failures.
+  }
+}
+
+async function setShowUnavailable(show: boolean): Promise<void> {
+  state.showUnavailable = show;
+  await reloadCatalog();
 }
 
 function login(): void {
@@ -131,6 +197,7 @@ async function logout(): Promise<void> {
   state.session = await graphTesterApi.getSession();
   state.result = null;
   state.error = null;
+  await reloadCatalog();
 }
 
 async function runFunction(
@@ -179,12 +246,19 @@ export function useGraphTester() {
     state,
     selectedService,
     selectedEntry,
+    selectedEntryEnabled,
     isAuthenticated,
+    identityMismatch,
     totalFunctions,
+    enabledFunctionCount,
+    disabledFunctionCount,
     canRun,
     init,
     selectFunction,
     refreshSession,
+    refreshCapabilities,
+    reloadCatalog,
+    setShowUnavailable,
     login,
     logout,
     runFunction,

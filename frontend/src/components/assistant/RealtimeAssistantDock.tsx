@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import {
   Check,
   Loader2,
@@ -33,6 +39,7 @@ import type {
   MicCleanupSettings,
 } from "@/lib/micCleanup";
 import type { DashboardCardItem, DashboardResponse } from "@/lib/types";
+import { readLocal, writeLocal } from "@/lib/storage";
 import { cn } from "@/lib/utils";
 
 interface RealtimeAssistantDockProps {
@@ -61,6 +68,31 @@ const GENNY_BOT_STATES: readonly GennyBotState[] = [
   "error",
 ];
 
+const FLOATING_WIDGET_STORAGE_KEY = "genny-floating-widget-position";
+const FLOATING_WIDGET_MARGIN = 18;
+const FLOATING_WIDGET_FALLBACK_SIZE = {
+  width: 180,
+  height: 214,
+};
+
+interface FloatingPosition {
+  x: number;
+  y: number;
+}
+
+interface FloatingDragState {
+  pointerId: number;
+  origin: FloatingPosition;
+  startX: number;
+  startY: number;
+  moved: boolean;
+}
+
+interface ViewportSize {
+  width: number;
+  height: number;
+}
+
 export function RealtimeAssistantDock({
   items,
   summary,
@@ -73,7 +105,14 @@ export function RealtimeAssistantDock({
   const [draft, setDraft] = useState("");
   const [manualBotState, setManualBotState] = useState<GennyBotState | null>(null);
   const [dismissedErrorSignal, setDismissedErrorSignal] = useState<string | null>(null);
+  const [floatingPosition, setFloatingPosition] =
+    useState<FloatingPosition | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const widgetRef = useRef<HTMLDivElement | null>(null);
+  const floatingPositionRef = useRef<FloatingPosition | null>(null);
+  const dragStateRef = useRef<FloatingDragState | null>(null);
+  const ignoreNextToggleRef = useRef(false);
   const {
     status,
     isConnected,
@@ -121,6 +160,33 @@ export function RealtimeAssistantDock({
   const botState = manualBotState ?? realtimeBotState;
 
   useEffect(() => {
+    floatingPositionRef.current = floatingPosition;
+  }, [floatingPosition]);
+
+  const syncFloatingWidget = useEffectEvent(
+    (preferredPosition: FloatingPosition | null = null) => {
+      const nextViewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      };
+
+      setFloatingPosition((currentPosition) => {
+        const basePosition =
+          preferredPosition ??
+          currentPosition ??
+          readLocal<FloatingPosition>(FLOATING_WIDGET_STORAGE_KEY) ??
+          getDefaultFloatingPosition(nextViewport);
+
+        return clampFloatingPosition(
+          basePosition,
+          widgetRef.current,
+          nextViewport
+        );
+      });
+    }
+  );
+
+  useEffect(() => {
     const setGennyBotState = (nextState: GennyBotState) => {
       if (!isGennyBotState(nextState)) {
         console.warn(`Unsupported Genny bot state: ${String(nextState)}`);
@@ -146,6 +212,23 @@ export function RealtimeAssistantDock({
       if (window.GennyBot === controller) {
         delete window.GennyBot;
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      syncFloatingWidget();
+    });
+
+    const handleResize = () => {
+      syncFloatingWidget();
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", handleResize);
     };
   }, []);
 
@@ -206,10 +289,115 @@ export function RealtimeAssistantDock({
     await connect();
   };
 
+  const finishFloatingDrag = (
+    pointerId: number,
+    target: HTMLButtonElement
+  ) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== pointerId) {
+      return;
+    }
+
+    if (target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId);
+    }
+
+    dragStateRef.current = null;
+    setIsDragging(false);
+
+    if (!dragState.moved) {
+      return;
+    }
+
+    ignoreNextToggleRef.current = true;
+    if (floatingPositionRef.current) {
+      writeLocal(FLOATING_WIDGET_STORAGE_KEY, floatingPositionRef.current);
+    }
+  };
+
+  const handleFloatingBotPointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const currentPosition = floatingPositionRef.current ?? floatingPosition;
+    if (!currentPosition) {
+      return;
+    }
+
+    ignoreNextToggleRef.current = false;
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      origin: currentPosition,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleFloatingBotPointerMove = (
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - dragState.startX;
+    const deltaY = event.clientY - dragState.startY;
+
+    if (!dragState.moved && Math.hypot(deltaX, deltaY) < 6) {
+      return;
+    }
+
+    dragState.moved = true;
+    setIsDragging(true);
+    setFloatingPosition(
+      clampFloatingPosition(
+        {
+          x: dragState.origin.x + deltaX,
+          y: dragState.origin.y + deltaY,
+        },
+        widgetRef.current,
+        {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        }
+      )
+    );
+  };
+
+  const handleFloatingBotClick = () => {
+    if (ignoreNextToggleRef.current) {
+      ignoreNextToggleRef.current = false;
+      return;
+    }
+
+    setExpanded(true);
+  };
+
+  if (!floatingPosition) {
+    return null;
+  }
+
   return (
-    <div className="pointer-events-none fixed bottom-5 right-5 z-40">
+    <div
+      ref={widgetRef}
+      className="pointer-events-none fixed z-40"
+      style={{
+        left: floatingPosition.x,
+        top: floatingPosition.y,
+      }}
+    >
       {expanded ? (
-        <section className="pointer-events-auto flex max-h-[calc(100vh-2.5rem)] w-[min(26rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[26px] border border-cyan-900/50 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.16),_transparent_42%),linear-gradient(180deg,_rgba(7,13,24,0.98),_rgba(4,9,18,0.98))] shadow-[0_28px_80px_rgba(2,8,23,0.7)] backdrop-blur-xl">
+        <section
+          id="realtime-assistant-panel"
+          className="pointer-events-auto flex max-h-[calc(100vh-2.5rem)] w-[min(26rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-[26px] border border-cyan-900/50 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.16),_transparent_42%),linear-gradient(180deg,_rgba(7,13,24,0.98),_rgba(4,9,18,0.98))] shadow-[0_28px_80px_rgba(2,8,23,0.7)] backdrop-blur-xl"
+        >
           <div className="shrink-0 border-b border-slate-800/80 px-4 py-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -458,24 +646,81 @@ export function RealtimeAssistantDock({
           </div>
         </section>
       ) : (
-        <button
-          id="gennyFloatingIcon"
-          type="button"
-          onClick={() => setExpanded(true)}
-          className="genny-bot-trigger pointer-events-auto flex items-center gap-3 rounded-[2rem] border border-cyan-400/25 bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.22),transparent_34%),linear-gradient(135deg,rgba(8,16,30,0.97),rgba(15,23,42,0.95))] px-3 py-3 pr-5 text-left shadow-[0_18px_45px_rgba(2,8,23,0.55)] transition-[border-color,box-shadow,transform] duration-300 hover:-translate-y-1 hover:border-cyan-300/45 hover:shadow-[0_26px_70px_rgba(8,145,178,0.32)] focus-visible:outline-none"
-          title="Open Genny (Virtual Assistant)"
-          aria-label="Open Genny virtual assistant"
-        >
-          <GennyBotMascot state={botState} interactive />
-          <span>
-            <span className="block text-sm font-semibold text-slate-100">
-              Genny
-            </span>
-            <span className="block text-xs text-slate-400">
-              Realtime queue help
-            </span>
-          </span>
-        </button>
+        <div className="flex flex-col items-center gap-3">
+          <div className="pointer-events-auto flex items-center botButton-Z gap-2 rounded-full border border-cyan-400/20 bg-slate-950/65 px-2 py-2 shadow-[0_18px_45px_rgba(2,8,23,0.42)] backdrop-blur-md">
+            <Button
+              variant={isConnected ? "outline" : "default"}
+              onClick={() => void handleConnectClick()}
+              className={cn(
+                "h-8 rounded-full px-3 text-[11px] font-semibold",
+                isConnected
+                  ? "border-red-500/35 bg-red-500/10 text-red-200 hover:border-red-400/50 hover:bg-red-500/15"
+                  : "bg-cyan-400 text-slate-950 hover:bg-cyan-300"
+              )}
+            >
+              {status === "connecting" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : isConnected ? (
+                <PhoneOff className="h-3.5 w-3.5" />
+              ) : (
+                <Phone className="h-3.5 w-3.5" />
+              )}
+              {status === "connecting"
+                ? "Connecting"
+                : isConnected
+                  ? "Disconnect"
+                  : "Start session"}
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={toggleMute}
+              disabled={!isConnected}
+              className="h-8 rounded-full border-slate-700/80 bg-slate-950/35 px-3 text-[11px] font-semibold text-slate-100 hover:border-cyan-500/40 hover:bg-slate-900 disabled:opacity-55"
+            >
+              {isMuted ? (
+                <MicOff className="h-3.5 w-3.5 text-amber-300" />
+              ) : (
+                <Mic className="h-3.5 w-3.5 text-cyan-300" />
+              )}
+              {isMuted ? "Unmute" : "Mute"}
+            </Button>
+          </div>
+
+          <button
+            id="gennyFloatingIcon"
+            type="button"
+            onClick={handleFloatingBotClick}
+            onPointerDown={handleFloatingBotPointerDown}
+            onPointerMove={handleFloatingBotPointerMove}
+            onPointerUp={(event) =>
+              finishFloatingDrag(event.pointerId, event.currentTarget)
+            }
+            onPointerCancel={(event) =>
+              finishFloatingDrag(event.pointerId, event.currentTarget)
+            }
+            onLostPointerCapture={(event) =>
+              finishFloatingDrag(event.pointerId, event.currentTarget)
+            }
+            className={cn(
+              "genny-bot-trigger pointer-events-auto relative flex h-[10.75rem] w-[9.5rem] touch-none select-none items-center justify-center rounded-[2.5rem] focus-visible:outline-none",
+              isDragging ? "cursor-grabbing" : "cursor-grab"
+            )}
+            title="Open Genny (Virtual Assistant)"
+            aria-label="Open Genny virtual assistant"
+            aria-expanded={expanded}
+            aria-controls="realtime-assistant-panel"
+          >
+            <span className="pointer-events-none absolute inset-x-4 bottom-4 h-8 rounded-full bg-cyan-400/25 blur-2xl" />
+            <span className="pointer-events-none absolute inset-3 rounded-[2.4rem] bg-[radial-gradient(circle_at_50%_32%,rgba(14,165,233,0.18),transparent_62%)]" />
+            <GennyBotMascot
+              state={botState}
+              size="floating"
+              interactive
+              className="relative z-10"
+            />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -516,6 +761,54 @@ function isGennyBotState(value: unknown): value is GennyBotState {
     typeof value === "string" &&
     (GENNY_BOT_STATES as readonly string[]).includes(value)
   );
+}
+
+function getDefaultFloatingPosition(viewport: ViewportSize): FloatingPosition {
+  return clampFloatingPosition(
+    {
+      x: viewport.width - FLOATING_WIDGET_FALLBACK_SIZE.width - FLOATING_WIDGET_MARGIN,
+      y: viewport.height - FLOATING_WIDGET_FALLBACK_SIZE.height - FLOATING_WIDGET_MARGIN,
+    },
+    null,
+    viewport
+  );
+}
+
+function clampFloatingPosition(
+  position: FloatingPosition,
+  widget: HTMLDivElement | null,
+  viewport: ViewportSize
+): FloatingPosition {
+  const size = measureFloatingWidget(widget);
+  const maxX = Math.max(
+    FLOATING_WIDGET_MARGIN,
+    viewport.width - size.width - FLOATING_WIDGET_MARGIN
+  );
+  const maxY = Math.max(
+    FLOATING_WIDGET_MARGIN,
+    viewport.height - size.height - FLOATING_WIDGET_MARGIN
+  );
+
+  return {
+    x: clamp(position.x, FLOATING_WIDGET_MARGIN, maxX),
+    y: clamp(position.y, FLOATING_WIDGET_MARGIN, maxY),
+  };
+}
+
+function measureFloatingWidget(widget: HTMLDivElement | null) {
+  if (!widget) {
+    return FLOATING_WIDGET_FALLBACK_SIZE;
+  }
+
+  const rect = widget.getBoundingClientRect();
+  return {
+    width: rect.width || FLOATING_WIDGET_FALLBACK_SIZE.width,
+    height: rect.height || FLOATING_WIDGET_FALLBACK_SIZE.height,
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function EmailConfirmation({
@@ -645,7 +938,7 @@ function EmailConfirmation({
         <p className="mt-2 text-xs text-red-200">{status.message}</p>
       )}
       <p className="mt-2 text-[11px] text-slate-400">
-        Review carefully — this sends a real email from your mailbox via Microsoft Graph.
+        Review carefully - this sends a real email from your mailbox via Microsoft Graph. You can also say "yes send it now" while this draft is staged.
       </p>
     </div>
   );

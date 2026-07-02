@@ -15,7 +15,7 @@
  *   GRAPH_CLIENT_SECRET
  */
 
-import "dotenv/config";
+import "../src/loadEnv.js";
 import { buildConfig } from "../src/server/config/env.js";
 import { acquireTokenInteractive } from "../src/server/services/graph/graphClient.js";
 import { isTokenExpired, getTokenScopes } from "../src/server/services/graph/tokenUtils.js";

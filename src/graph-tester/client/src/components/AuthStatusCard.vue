@@ -25,15 +25,25 @@ const view = computed(() => {
   const session = props.session || ({} as SessionResponse);
 
   if (authenticated.value) {
+    const mismatch = session.identityMatch === false;
     return {
-      state: "ready",
-      badge: session.tokenType === "application" ? "App token" : "Delegated",
-      message: session.claims?.preferredUsername
-        ? `Signed in as ${session.claims.preferredUsername}.`
-        : "A persisted Graph token is active.",
+      state: mismatch ? "warn" : "ready",
+      badge: mismatch
+        ? "Identity mismatch"
+        : session.tokenType === "application"
+          ? "App token"
+          : "Delegated",
+      message: mismatch
+        ? `Token was issued to "${session.claims?.appDisplayName || session.claims?.appId}" — not this app registration. Clear it and log in again.`
+        : session.claims?.preferredUsername
+          ? `Signed in as ${session.claims.preferredUsername}.`
+          : "A persisted Graph token is active.",
       pills: [
         { text: `Expires: ${formatDateTime(session.expiresAt)}` },
         { text: `Scopes: ${(session.grantedScopes || []).length}` },
+        session.claims?.appId
+          ? { text: `Token app: ${session.claims.appDisplayName || session.claims.appId}` }
+          : null,
         session.lastAuthMethod ? { text: `Source: ${toDisplayLabel(session.lastAuthMethod)}` } : null,
         session.tokenCachePresent ? { text: `Cache: ${trimPath(session.tokenCacheFile)}` } : null,
         session.grantedRoles?.length ? { text: `Roles: ${session.grantedRoles.length}` } : null,

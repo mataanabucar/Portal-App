@@ -586,3 +586,182 @@ body {
     transform: none;
   }
 }
+
+.genny-bot--floating {
+    width: 15.75rem;
+    height: auto;
+}
+
+.genny-bot--header {
+  width: 4rem;
+  height: 4rem;
+}
+
+.genny-bot {
+  --genny-video-glow: rgba(34, 211, 238, 0.26);
+}
+
+.genny-bot::after {
+  inset: 18%;
+  background:
+    radial-gradient(circle, rgba(34, 211, 238, 0.22), transparent 68%),
+    radial-gradient(circle at 68% 24%, rgba(74, 222, 128, 0.16), transparent 40%);
+  filter: blur(18px);
+}
+
+.genny-bot__video-shell {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.genny-bot__video-shell::before {
+  content: "";
+  position: absolute;
+  inset: 14% 18% 12%;
+  border-radius: 999px;
+  background: radial-gradient(circle at 50% 60%, var(--genny-video-glow), transparent 72%);
+  filter: blur(18px);
+  opacity: 0.95;
+  animation: genny-bot-video-halo 3.1s ease-in-out infinite;
+}
+
+.genny-bot__video-shell::after {
+  content: "";
+  position: absolute;
+  right: 20%;
+  bottom: 10%;
+  left: 20%;
+  height: 16%;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.34), transparent 72%);
+  filter: blur(14px);
+  opacity: 0.55;
+  animation: genny-bot-video-shadow 3.6s ease-in-out infinite;
+}
+
+.genny-bot__video {
+  position: relative;
+  z-index: 9;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 26px rgba(2, 8, 23, 0.42));
+}
+.botButton-Z{
+	z-index: 1000;
+}
+.genny-bot--interactive {
+  animation: genny-bot-video-float 4.7s ease-in-out infinite;
+}
+
+.genny-bot--header .genny-bot__video-shell::before {
+  inset: 18% 22% 16%;
+  filter: blur(10px);
+}
+
+.genny-bot--header .genny-bot__video-shell::after {
+  right: 24%;
+  bottom: 13%;
+  left: 24%;
+  height: 14%;
+  filter: blur(10px);
+}
+
+.genny-bot[data-state="idle"] {
+  --genny-video-glow: rgba(34, 211, 238, 0.24);
+}
+
+.genny-bot[data-state="listening"] {
+  --genny-video-glow: rgba(74, 222, 128, 0.42);
+}
+
+.genny-bot[data-state="thinking"] {
+  --genny-video-glow: rgba(56, 189, 248, 0.4);
+}
+
+.genny-bot[data-state="responding"] {
+  --genny-video-glow: rgba(96, 165, 250, 0.48);
+}
+
+.genny-bot[data-state="error"] {
+  --genny-video-glow: rgba(251, 113, 133, 0.48);
+}
+
+.genny-bot[data-state="listening"] .genny-bot__video-shell::before {
+  animation-duration: 1.2s;
+}
+
+.genny-bot[data-state="thinking"] .genny-bot__video-shell::before {
+  animation-duration: 1.7s;
+}
+
+.genny-bot[data-state="responding"] .genny-bot__video-shell::before {
+  animation-duration: 0.95s;
+}
+
+.genny-bot[data-state="responding"] .genny-bot__video-shell::after {
+  animation-duration: 0.95s;
+  opacity: 0.72;
+}
+
+.genny-bot[data-state="error"] .genny-bot__video-shell::before {
+  background: radial-gradient(circle at 50% 60%, rgba(251, 113, 133, 0.58), transparent 70%);
+}
+
+.genny-bot-trigger:hover .genny-bot,
+.genny-bot-trigger:focus-visible .genny-bot {
+  transform: translateY(-4px) scale(1.03);
+  filter: drop-shadow(0 0 24px rgba(34, 211, 238, 0.18));
+}
+
+.genny-bot-trigger:active .genny-bot {
+  transform: translateY(0) scale(0.98);
+}
+
+@keyframes genny-bot-video-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(1deg);
+  }
+}
+
+@keyframes genny-bot-video-halo {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.96;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes genny-bot-video-shadow {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scaleX(0.88);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scaleX(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .genny-bot--interactive,
+  .genny-bot__video-shell::before,
+  .genny-bot__video-shell::after {
+    animation: none !important;
+	top: 25px;
+  }
+}

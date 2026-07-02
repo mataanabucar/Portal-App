@@ -1,11 +1,34 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { Router } from "express";
-import { getClientCatalog, getCatalogEntry } from "../catalog/graphTesterCatalog.js";
+import {
+  getClientCatalog,
+  getCatalogEntry,
+  getFlatCatalog,
+  isCatalogEntryEnabled,
+  getCatalogEntryMissingScopes,
+} from "../catalog/graphTesterCatalog.js";
+import {
+  buildCapabilityReport,
+  parseDecodedTokenFile,
+} from "../../server/services/graph/graphCapabilities.js";
 import { hasGraphTesterAuthConfig } from "../utils/graphSession.js";
 import { parseCatalogArgs } from "../utils/fieldParsers.js";
 import { buildGraphTesterError, buildResultSummary, countResultItems } from "../utils/resultFormatting.js";
 
 export function createGraphTesterRouter({ config, authStore }) {
   const router = Router();
+
+  // Delegated scopes from the current runtime token. Only tokens issued to
+  // this app's client id gate features — never Graph Explorer / Outlook Web.
+  async function getSessionScopes() {
+    const session = await authStore.buildStatusPayload();
+    const grantedScopes =
+      session.authenticated && session.tokenType === "delegated"
+        ? session.grantedScopes || []
+        : [];
+    return { session, grantedScopes };
+  }
 
   // Public app metadata used by the standalone UI to bootstrap itself.
   router.get("/api/health", (request, response) => {
@@ -26,11 +49,68 @@ export function createGraphTesterRouter({ config, authStore }) {
     });
   });
 
-  router.get("/api/graph-tester/catalog", (request, response) => {
+  // Catalog is gated by the signed-in token's delegated scopes. By default
+  // only enabled functions are returned; ?includeUnavailable=true adds the
+  // disabled ones with enabled: false and their missingScopes.
+  router.get("/api/graph-tester/catalog", async (request, response) => {
+    const includeUnavailable = request.query.includeUnavailable === "true";
+    const { session, grantedScopes } = await getSessionScopes();
+
+    const services = session.authenticated
+      ? getClientCatalog(grantedScopes, { includeUnavailable })
+      : includeUnavailable
+        ? getClientCatalog([], { includeUnavailable: true })
+        : [];
+
     response.json({
       ok: true,
-      services: getClientCatalog(),
+      authenticated: session.authenticated === true,
+      includeUnavailable,
+      services,
+      hint: session.authenticated
+        ? undefined
+        : "Login is required. Unauthenticated catalogs list functions as disabled metadata only.",
       generatedAt: new Date().toISOString(),
+    });
+  });
+
+  // Capability report: token identity vs the app registration, granted
+  // delegated scopes, and which catalog functions they enable.
+  router.get("/api/graph-tester/capabilities", async (request, response) => {
+    const { session, grantedScopes } = await getSessionScopes();
+    const manifest = await readContextManifest();
+    const decodedTokenClaims = await readContextDecodedTokenClaims();
+
+    const currentTokenClaims = session.authenticated
+      ? {
+          scp:
+            session.tokenType === "delegated" ? grantedScopes.join(" ") : undefined,
+          roles: session.grantedRoles?.length ? session.grantedRoles : undefined,
+          appid: session.claims?.appId || null,
+          app_displayname: session.claims?.appDisplayName || null,
+          tid: session.claims?.tid || null,
+          upn: session.claims?.preferredUsername || null,
+          name: session.claims?.name || null,
+          exp: session.expiresAt
+            ? Math.floor(Date.parse(session.expiresAt) / 1000)
+            : null,
+        }
+      : null;
+
+    const report = buildCapabilityReport({
+      manifest,
+      decodedTokenClaims,
+      currentTokenClaims,
+      catalog: getFlatCatalog(),
+    });
+
+    response.json({
+      ok: true,
+      authenticated: session.authenticated === true,
+      tokenType: session.tokenType || null,
+      configClientId: config.graphClientId || null,
+      requestedScopes: config.graphScopes,
+      ...report,
     });
   });
 
@@ -72,7 +152,7 @@ export function createGraphTesterRouter({ config, authStore }) {
 
     const entry = getCatalogEntry(service, functionName);
 
-    if (!entry) {
+    if (!entry || entry.hidden) {
       const errorPayload = buildGraphTesterError(
         createHttpError(
           404,
@@ -82,6 +162,40 @@ export function createGraphTesterRouter({ config, authStore }) {
         )
       );
       response.status(errorPayload.status).json({ ok: false, error: errorPayload });
+      return;
+    }
+
+    // Server-side scope gate — never rely on the UI hiding a function. This
+    // rejects before any Graph call is attempted.
+    const { session, grantedScopes } = await getSessionScopes();
+
+    if (!session.authenticated) {
+      const errorPayload = buildGraphTesterError(
+        createHttpError(
+          401,
+          "No signed-in Graph session. Login is required before running functions.",
+          "GraphAuthRequired",
+          "Use the Login button (or /auth/login) to sign in with the portal app registration."
+        )
+      );
+      response.status(errorPayload.status).json({ ok: false, error: errorPayload });
+      return;
+    }
+
+    if (!isCatalogEntryEnabled(entry, grantedScopes)) {
+      const missingScopes = getCatalogEntryMissingScopes(entry, grantedScopes);
+      const errorPayload = buildGraphTesterError(
+        createHttpError(
+          403,
+          `The signed-in token does not grant the scopes required for ${service}.${functionName}. ` +
+            `Missing: ${missingScopes.join(", ") || "unknown"}.`,
+          "GraphFunctionScopeMissing",
+          "Add the scope to GRAPH_SCOPES, delete the cached token file, and log in again."
+        )
+      );
+      response
+        .status(errorPayload.status)
+        .json({ ok: false, error: { ...errorPayload, missingScopes } });
       return;
     }
 
@@ -125,6 +239,46 @@ export function createGraphTesterRouter({ config, authStore }) {
   });
 
   return router;
+}
+
+const CONTEXT_DIR = path.resolve(process.cwd(), "filesforcontext");
+
+// App-registration manifest from filesforcontext/ — the file that carries
+// appId + displayName. Diagnostics only; runtime identity is GRAPH_CLIENT_ID.
+async function readContextManifest() {
+  try {
+    const fileNames = await fs.readdir(CONTEXT_DIR);
+    for (const fileName of fileNames) {
+      if (!fileName.endsWith(".json") || fileName.includes("generated")) continue;
+      try {
+        const parsed = JSON.parse(
+          await fs.readFile(path.join(CONTEXT_DIR, fileName), "utf-8")
+        );
+        if (parsed && typeof parsed.appId === "string" && parsed.displayName) {
+          return parsed;
+        }
+      } catch {
+        // Not clean JSON (e.g. decodedToken.json) — skip.
+      }
+    }
+  } catch {
+    // filesforcontext/ is optional at runtime.
+  }
+  return null;
+}
+
+// decodedToken.json is a decoded JWT text file ({header}.{payload}.[Signature]),
+// not valid JSON — parse defensively. Diagnostics only.
+async function readContextDecodedTokenClaims() {
+  try {
+    const rawText = await fs.readFile(
+      path.join(CONTEXT_DIR, "decodedToken.json"),
+      "utf-8"
+    );
+    return parseDecodedTokenFile(rawText).claims;
+  } catch {
+    return null;
+  }
 }
 
 function assertAuthConfig(config) {

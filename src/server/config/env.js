@@ -1,4 +1,8 @@
 import { parseJsonEnv } from "../utils/parseJsonEnv.js";
+import {
+  DEFAULT_GRAPH_SCOPES,
+  sanitizeGraphScopes,
+} from "../services/graph/graphCapabilities.js";
 
 export function buildConfig(overrides = {}) {
   // Master AI provider switch. Toggle every feature (parser, summary, ask) at
@@ -130,9 +134,12 @@ export function buildConfig(overrides = {}) {
     graphTenantId:      process.env.GRAPH_TENANT_ID      || "",
     graphClientId:      process.env.GRAPH_CLIENT_ID      || "",
     graphClientSecret:  process.env.GRAPH_CLIENT_SECRET  || "",
-    //graphRedirectUri:   process.env.GRAPH_REDIRECT_URI   || "http://localhost:3069/auth/redirect",
-    graphRedirectUri:   "https://login.microsoftonline.com/common/oauth2/nativeclient",
-    graphScopes:        (process.env.GRAPH_SCOPES || "User.Read Mail.Read Calendars.Read offline_access").split(" ").filter(Boolean),
+    graphRedirectUri:   process.env.GRAPH_REDIRECT_URI   || "http://localhost:3069/auth/redirect",
+    // Requested delegated scopes. Adding a scope (e.g. Mail.Send) requires
+    // deleting .local-auth/graph-tester-token.json and logging in again.
+    graphScopes:        sanitizeGraphScopes(
+      (process.env.GRAPH_SCOPES || DEFAULT_GRAPH_SCOPES).split(/\s+/).filter(Boolean)
+    ),
     // Outbound email is an outward-facing action: off unless explicitly enabled,
     // and still requires Mail.Send + Mail.ReadWrite in GRAPH_SCOPES and the token.
     graphMailSendEnabled: process.env.GRAPH_MAIL_SEND_ENABLED === "true",

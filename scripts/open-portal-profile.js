@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../src/loadEnv.js";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import {

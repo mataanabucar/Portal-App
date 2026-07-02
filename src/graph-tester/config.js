@@ -1,7 +1,8 @@
 import path from "node:path";
-
-const DEFAULT_GRAPH_SCOPES =
-  "User.Read Mail.Read Calendars.Read Chat.Read People.Read MailboxSettings.ReadWrite offline_access";
+import {
+  DEFAULT_GRAPH_SCOPES,
+  sanitizeGraphScopes,
+} from "../server/services/graph/graphCapabilities.js";
 
 export function buildGraphTesterConfig(overrides = {}) {
   const baseConfig = {
@@ -14,9 +15,11 @@ export function buildGraphTesterConfig(overrides = {}) {
     graphTenantId: process.env.GRAPH_TENANT_ID || "",
     graphClientId: process.env.GRAPH_CLIENT_ID || "",
     graphClientSecret: process.env.GRAPH_CLIENT_SECRET || "",
-    graphScopes: (process.env.GRAPH_SCOPES || DEFAULT_GRAPH_SCOPES)
-      .split(" ")
-      .filter(Boolean),
+    // Adding a scope (e.g. Mail.Send) requires deleting the token cache file
+    // and logging in again so the cached token carries the new scope.
+    graphScopes: sanitizeGraphScopes(
+      (process.env.GRAPH_SCOPES || DEFAULT_GRAPH_SCOPES).split(/\s+/).filter(Boolean)
+    ),
     graphRedirectUri: process.env.GRAPH_TESTER_REDIRECT_URI || "",
   };
   const mergedConfig = { ...baseConfig, ...overrides };

@@ -92,6 +92,46 @@ export async function getMessage(token, messageId, { select } = {}) {
 }
 
 /**
+ * Clean public alias for getMessage.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function readMessage(token, messageId, options = {}) {
+  return getMessage(token, messageId, options);
+}
+
+/**
+ * Read a whole conversation thread: every message in /me/messages that shares
+ * the given conversationId, oldest first. Graph rejects $orderby combined with
+ * a conversationId $filter, so the ascending sort happens locally.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function readConversation(token, conversationId, { select, top } = {}) {
+  const data = await graphRequest({
+    method: "GET",
+    path: "/me/messages",
+    token,
+    query: {
+      $filter: `conversationId eq '${String(conversationId).replace(/'/g, "''")}'`,
+      $select: select,
+      $top: top,
+    },
+  });
+
+  const messages = data?.value ?? [];
+  return messages.sort((a, b) =>
+    String(a.receivedDateTime || "").localeCompare(String(b.receivedDateTime || ""))
+  );
+}
+
+/**
+ * Alias for readConversation.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function readThread(token, conversationId, options = {}) {
+  return readConversation(token, conversationId, options);
+}
+
+/**
  * Get MIME content for a message as a raw response.
  * @scope Mail.Read or Mail.ReadWrite
  */
@@ -121,6 +161,14 @@ export async function searchMyMessages(token, searchText, { top, select } = {}) 
     headers: { ConsistencyLevel: "eventual" },
   });
   return data?.value ?? [];
+}
+
+/**
+ * Clean public alias for searchMyMessages.
+ * @scope Mail.Read or Mail.ReadWrite
+ */
+export async function searchMessages(token, searchText, options = {}) {
+  return searchMyMessages(token, searchText, options);
 }
 
 /**
@@ -345,6 +393,35 @@ export async function createDraftMessage(token, draftInput) {
 }
 
 /**
+ * Clean public alias for createDraftMessage.
+ * @scope Mail.ReadWrite
+ */
+export async function createDraft(token, draftInput) {
+  return createDraftMessage(token, draftInput);
+}
+
+/**
+ * Reply to a message as the signed-in user. Accepts either a plain comment
+ * string or a Graph reply payload ({ comment } and/or { message }).
+ * @scope Mail.Send
+ */
+export async function replyToMessage(token, messageId, commentOrBody) {
+  const body =
+    typeof commentOrBody === "string"
+      ? { comment: commentOrBody }
+      : commentOrBody && typeof commentOrBody === "object"
+        ? commentOrBody
+        : { comment: "" };
+
+  return graphRequest({
+    method: "POST",
+    path: `/me/messages/${encodeURIComponent(messageId)}/reply`,
+    token,
+    body,
+  });
+}
+
+/**
  * Update a draft (partial update — only send changed fields).
  * @scope Mail.ReadWrite
  */
@@ -416,9 +493,17 @@ export async function listSharedMailboxFolders(token, sharedMailbox, { top, sele
   return data?.value ?? [];
 }
 
-/** @scope Mail.Send */
-export async function sendMail(token, messageInput) {
-  return graphRequest({ method: "POST", path: "/me/sendMail", token, body: { message: messageInput } });
+/**
+ * Send a message as the signed-in user.
+ * @scope Mail.Send
+ * @param {object} options.saveToSentItems  Defaults to true on the Graph side.
+ */
+export async function sendMail(token, messageInput, { saveToSentItems } = {}) {
+  const body = { message: messageInput };
+  if (saveToSentItems !== undefined) {
+    body.saveToSentItems = Boolean(saveToSentItems);
+  }
+  return graphRequest({ method: "POST", path: "/me/sendMail", token, body });
 }
 
 /**

@@ -5,8 +5,8 @@ const express = require('express')
 const dotenv = require('dotenv')
 
 const appDir = __dirname
-dotenv.config({ path: path.join(appDir, '.env') })
-dotenv.config({ path: path.join(appDir, '..', '.env'), override: false })
+dotenv.config({ path: path.join(appDir, '..', '.env'), override: true, quiet: true })
+dotenv.config({ path: path.join(appDir, '.env'), override: true, quiet: true })
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -97,7 +97,10 @@ function buildConfig() {
     scopes: firstNonEmpty(
       process.env.GRAPH_AUTHS_SCOPES,
       process.env.GRAPH_SCOPES,
-      'openid email profile User.Read User.ReadBasic.All User.ReadWrite People.Read Mail.Read Mail.Read.Shared Mail.ReadBasic Mail.ReadBasic.Shared Mail.ReadWrite Mail.ReadWrite.Shared MailboxSettings.ReadWrite Calendars.Read Calendars.Read.Shared Calendars.ReadBasic Calendars.ReadWrite Chat.Create Chat.Read Chat.ReadBasic Chat.ReadWrite ChatMessage.Read ChatMessage.Send ChannelMessage.Edit ChannelMessage.Send offline_access'
+      // Keep in sync with DEFAULT_GRAPH_SCOPES in src/server/services/graph/graphCapabilities.js.
+      // .default = all tenant-approved delegated Graph permissions for this app;
+      // enumerating individual scopes risks AADSTS65001 on any unapproved one.
+      'openid profile email offline_access https://graph.microsoft.com/.default'
     ).split(/\s+/).filter(Boolean),
     redirectUri,
     outputFile: firstNonEmpty(process.env.GRAPH_AUTHS_OUTPUT_FILE, '../.local-auth/graph-tester-token.json'),

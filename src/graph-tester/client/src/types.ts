@@ -37,6 +37,11 @@ export interface CatalogField {
   recommendedValues?: string[];
 }
 
+export interface RequiredScopes {
+  any: string[];
+  all: string[];
+}
+
 export interface CatalogFunction {
   service: string;
   functionName: string;
@@ -51,6 +56,10 @@ export interface CatalogFunction {
   samplePayloads: Record<string, FieldSample[]>;
   outputHint: string;
   requiredFields: string[];
+  // Delegated-scope gating computed server-side from the signed-in token.
+  requiredScopes?: RequiredScopes;
+  enabled?: boolean;
+  missingScopes?: string[];
 }
 
 export interface CatalogService {
@@ -62,8 +71,56 @@ export interface CatalogService {
 
 export interface CatalogResponse {
   ok: boolean;
+  authenticated?: boolean;
+  includeUnavailable?: boolean;
+  hint?: string;
   services: CatalogService[];
   generatedAt: string;
+}
+
+export interface CapabilityFunctionRef {
+  service: string;
+  functionName: string;
+  mutation: boolean;
+  requiredScopes: RequiredScopes | null;
+  missingScopes?: string[];
+  hidden?: boolean;
+}
+
+export interface CapabilityTokenSummary {
+  present: boolean;
+  tokenType: "delegated" | "application" | null;
+  appId: string | null;
+  appDisplayName: string | null;
+  aud: string | null;
+  tid: string | null;
+  upn: string | null;
+  name: string | null;
+  exp: number | null;
+  expiresAt: string | null;
+}
+
+export interface CapabilitiesResponse {
+  ok: boolean;
+  authenticated: boolean;
+  tokenType: "delegated" | "application" | null;
+  configClientId: string | null;
+  requestedScopes: string[];
+  generatedAt: string;
+  manifest: { appId: string | null; displayName: string | null };
+  tokenSource: "runtime" | "decodedTokenFile" | "none";
+  token: CapabilityTokenSummary;
+  decodedContextToken: CapabilityTokenSummary;
+  identityMatch: boolean;
+  grantedDelegatedScopes: string[];
+  expandedDelegatedScopes: string[];
+  oidcScopes: string[];
+  ignoredScopes: string[];
+  grantedRoles: string[];
+  enabledFunctions: CapabilityFunctionRef[];
+  disabledFunctions: CapabilityFunctionRef[];
+  counts: { enabled: number; disabled: number };
+  warnings: string[];
 }
 
 export interface HealthResponse {
@@ -87,6 +144,8 @@ export interface SessionClaims {
   tid: string | null;
   name: string | null;
   preferredUsername: string | null;
+  appId?: string | null;
+  appDisplayName?: string | null;
 }
 
 export interface SessionResponse {
@@ -110,6 +169,8 @@ export interface SessionResponse {
   grantedScopes?: string[];
   grantedRoles?: string[];
   expiresAt?: string | null;
+  configClientId?: string | null;
+  identityMatch?: boolean | null;
   claims?: SessionClaims;
 }
 

@@ -11,6 +11,11 @@ const props = defineProps<{
   running: boolean;
 }>();
 
+// Server-computed scope gate: entries with enabled === false are visible only
+// via the "show unavailable" toggle and must never be runnable.
+const entryEnabled = computed(() => props.entry?.enabled !== false);
+const missingScopes = computed(() => props.entry?.missingScopes || []);
+
 const emit = defineEmits<{
   (e: "run", payload: { args: Record<string, unknown>; confirmMutation: boolean }): void;
 }>();
@@ -36,17 +41,30 @@ const mutationReady = computed(
 );
 
 const canSubmit = computed(
-  () => props.authenticated && props.entry !== null && !props.running && mutationReady.value,
+  () =>
+    props.authenticated &&
+    props.entry !== null &&
+    entryEnabled.value &&
+    !props.running &&
+    mutationReady.value,
 );
 
 const buttonLabel = computed(() => {
   if (props.running) {
     return "Running…";
   }
-  return props.authenticated ? "Run function" : "Login required";
+  if (!props.authenticated) {
+    return "Login required";
+  }
+  return entryEnabled.value ? "Run function" : "Missing scopes";
 });
 
 const runHint = computed(() => {
+  if (props.authenticated && !entryEnabled.value) {
+    return missingScopes.value.length
+      ? `The signed-in token is missing: ${missingScopes.value.join(", ")}. Update GRAPH_SCOPES, clear the token cache, and log in again.`
+      : "The signed-in token does not grant the scopes this function needs.";
+  }
   if (props.authenticated) {
     return props.entry?.mutation
       ? "Mutating functions also require the confirmation checkbox."

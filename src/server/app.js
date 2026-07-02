@@ -24,6 +24,14 @@ import {
 import { findItemEmail } from "./services/graph/services/itemEmailService.js";
 import { createDraftMessage, sendDraftMessage, searchMyMessages, listInboxMessages } from "./services/graph/services/mailService.js";
 import { searchRecentChatMessages } from "./services/graph/services/teamsChatService.js";
+import { getTokenScopes } from "./services/graph/tokenUtils.js";
+import {
+  getClientCatalog,
+  getCatalogEntry,
+  isCatalogEntryEnabled,
+  getCatalogEntryMissingScopes,
+} from "../graph-tester/catalog/graphTesterCatalog.js";
+import { parseCatalogArgs } from "../graph-tester/utils/fieldParsers.js";
 import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
 import { registerKbDebugRoutes } from "./services/kb/debugRoutes.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
@@ -454,6 +462,8 @@ function buildRealtimeAssistantInstructions(hasPersona = false) {
     "Never claim you lack knowledge or can 'only use portal tools' — you have full general knowledge in addition to the live portal context and tools.",
     "On top of that, you have live access to Mataan's portal work queue: the dashboard context provided to you in this session, plus read-only tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question, search_docs).",
     "You can independently access Mataan's Microsoft 365: use search_emails for keyword/phrase Outlook searches, get_recent_emails for his latest/newest/most-recent messages (date-ordered, no keyword needed — use this for 'what's my last email'), and search_chats for Teams chat messages by keyword, person, or topic. These tools reach his entire mailbox and Teams history directly via Microsoft Graph and are COMPLETELY INDEPENDENT of the portal work queue — use them whenever he asks to find, recall, or look up an email or chat, even when it has nothing to do with the portal. Never tie an email or chat lookup to the portal queue unless he explicitly asks about a specific portal item. Summarize the hits (sender, date, subject/snippet) rather than guessing.",
+    "Beyond those shortcuts, you have FULL Microsoft 365 access through the generic Graph tools: call list_graph_functions to discover every mail, calendar, Teams chat/channel, To Do task, OneNote, contact, and profile function his signed-in account currently supports (with the argument fields each one needs), then call run_graph_function to execute one. Use these for anything the shortcut tools cannot do — calendar events, task lists, moving/replying to mail, chat messages, and so on.",
+    "run_graph_function safety: read-only functions may be called freely. Functions marked mutation: true change live Microsoft 365 data — before running one, state exactly what will change (recipients, subject, event time, task, etc.), get Mataan's explicit yes, and only then retry with confirmMutation: true. Never set confirmMutation on your own initiative, and never auto-send anything.",
     "Use the dashboard context and the portal queue tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question) ONLY when a question is about his specific portal queue items — their statuses, due dates, blockers, research findings, or an individual item's email context. Do not route general email or chat searches through the portal.",
     "You also have a documentation knowledge base of Mataan's own systems (ATS and calendar: backend/frontend architecture, database schemas, table relationships, design notes). When asked how those systems work, call search_docs to pull the relevant excerpts and answer from them; do not say you lack access to his documentation.",
     "Grounding rule applies ONLY to portal-specific facts (a particular item's status, ID, owner, due date, blockers, research results): rely on the provided context or a tool rather than guessing, and if you don't have it, say so or offer to fetch it.",
@@ -578,7 +588,7 @@ const REALTIME_TOOLS = [
     type: "function",
     name: "send_email",
     description:
-      "Compose an email and stage it for Mataan to review. This does NOT send immediately: it prepares the message and Mataan must explicitly confirm it in the portal UI before it is sent via Microsoft Graph. Use this only when Mataan asks to send or draft an email. Always read the recipients and subject back to him before calling this.",
+      'Compose an email and stage it for Mataan to review. This does NOT send immediately: it prepares the message and Mataan must explicitly confirm it before it is sent via Microsoft Graph. The current confirmation methods are saying "yes send it now" or confirming it in the portal UI. Use this only when Mataan asks to send or draft an email. Always read the recipients and subject back to him before calling this.',
     parameters: {
       type: "object",
       properties: {
@@ -661,6 +671,60 @@ const REALTIME_TOOLS = [
         },
       },
       required: ["query"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "list_graph_functions",
+    description:
+      "List every Microsoft 365 (Graph) function Mataan's signed-in account currently supports — mail (own + shared mailboxes), calendar, Teams chats and channel posts, To Do tasks, OneNote, contacts, mailbox settings, files, and profile. Returns each function's name, description, whether it mutates data, and the argument fields it takes. Call this first when run_graph_function is needed and the exact function name or arguments are unclear.",
+    parameters: {
+      type: "object",
+      properties: {
+        service: {
+          type: "string",
+          description:
+            "Optional service filter: user, calendar, mail, mailboxSettings, teamsChat, teamsChannel, people, tasks, onenote, contacts, files, calendarShared, mailShared, profile.",
+        },
+        search: {
+          type: "string",
+          description: "Optional keyword to filter functions by name or description.",
+        },
+      },
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "run_graph_function",
+    description:
+      "Run any Microsoft Graph function returned by list_graph_functions, using Mataan's signed-in Microsoft 365 account. Read-only functions can be run freely. Functions marked mutation: true CHANGE LIVE DATA (send/reply/move/delete mail, create/update events, post chat or channel messages, create/complete tasks): first tell Mataan exactly what will change and get his explicit yes, then retry with confirmMutation set to true. The server rejects mutations without that flag.",
+    parameters: {
+      type: "object",
+      properties: {
+        service: {
+          type: "string",
+          description: "The service key from list_graph_functions (e.g. mail, calendar, tasks).",
+        },
+        functionName: {
+          type: "string",
+          description: "The functionName from list_graph_functions (e.g. listEvents, sendMail, completeTask).",
+        },
+        args: {
+          type: "object",
+          description:
+            "Arguments for the function, matching the fields list_graph_functions reported (JSON fields take objects, others take strings/numbers/booleans).",
+          additionalProperties: true,
+        },
+        confirmMutation: {
+          type: "boolean",
+          description:
+            "Set true ONLY after Mataan explicitly confirmed a mutating function out loud. Leave false otherwise.",
+        },
+      },
+      required: ["service", "functionName"],
       additionalProperties: false,
     },
   },
@@ -1671,6 +1735,171 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       }
 
       response.json({ ok: true, count: results.length, results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Full Graph surface for the assistant (tool: list_graph_functions).
+  // Same allowlisted catalog and delegated-scope gating as the Graph tester —
+  // only functions the signed-in token actually supports are returned.
+  app.get("/api/assistant/graph/functions", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      const grantedScopes = getTokenScopes(token);
+      const serviceFilter =
+        typeof request.query.service === "string" ? request.query.service.trim() : "";
+      const searchFilter =
+        typeof request.query.search === "string"
+          ? request.query.search.trim().toLowerCase()
+          : "";
+
+      const services = getClientCatalog(grantedScopes)
+        .filter((service) => !serviceFilter || service.key === serviceFilter)
+        .map((service) => ({
+          service: service.key,
+          label: service.label,
+          description: service.description,
+          functions: service.functions
+            .filter(
+              (entry) =>
+                !searchFilter ||
+                entry.functionName.toLowerCase().includes(searchFilter) ||
+                entry.label.toLowerCase().includes(searchFilter) ||
+                entry.description.toLowerCase().includes(searchFilter)
+            )
+            // Compact shape: enough for the model to pick a function and build
+            // args without flooding the realtime context.
+            .map((entry) => ({
+              functionName: entry.functionName,
+              label: entry.label,
+              description: entry.description,
+              mutation: entry.mutation,
+              requiredFields: entry.requiredFields,
+              fields: entry.fields.map((field) => ({
+                name: field.name,
+                type: field.type,
+                required: Boolean(field.required),
+                description: field.description || field.placeholder || "",
+              })),
+            })),
+        }))
+        .filter((service) => service.functions.length > 0);
+
+      response.json({
+        ok: true,
+        grantedScopeCount: grantedScopes.length,
+        services,
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Run any allowlisted Graph function for the assistant (tool:
+  // run_graph_function). Scope gating and the mutation confirmation gate are
+  // enforced here, server-side — never in the model or the browser.
+  app.post("/api/assistant/graph/run", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      const {
+        service = "",
+        functionName = "",
+        args = {},
+        confirmMutation = false,
+      } = request.body || {};
+
+      const entry = getCatalogEntry(String(service), String(functionName));
+      if (!entry || entry.hidden) {
+        response.status(404).json({
+          ok: false,
+          error: `Unknown Graph function ${service}.${functionName}. Use list_graph_functions to discover valid names.`,
+        });
+        return;
+      }
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      const grantedScopes = getTokenScopes(token);
+      if (!isCatalogEntryEnabled(entry, grantedScopes)) {
+        const missingScopes = getCatalogEntryMissingScopes(entry, grantedScopes);
+        response.status(403).json({
+          ok: false,
+          error: `The signed-in token does not grant the scopes needed for ${service}.${functionName}.`,
+          missingScopes,
+        });
+        return;
+      }
+
+      if (entry.mutation && confirmMutation !== true) {
+        response.status(400).json({
+          ok: false,
+          error:
+            `${service}.${functionName} changes live Microsoft 365 data. Read the exact change back to Mataan, ` +
+            "get his explicit yes, then retry with confirmMutation: true.",
+          requiresConfirmation: true,
+        });
+        return;
+      }
+
+      let normalizedArgs;
+      try {
+        normalizedArgs = parseCatalogArgs(entry, args && typeof args === "object" ? args : {});
+      } catch (validationError) {
+        response.status(validationError.statusCode || 400).json({
+          ok: false,
+          error: validationError.message,
+          details: validationError.details || {},
+        });
+        return;
+      }
+
+      const startedAt = Date.now();
+      let data;
+      try {
+        data = await entry.invoke(token, normalizedArgs);
+      } catch (graphError) {
+        const status = Number(graphError?.status) || Number(graphError?.statusCode) || 502;
+        response.status(status >= 400 && status < 600 ? status : 502).json({
+          ok: false,
+          error: graphError?.graphMessage || graphError?.message || "Graph request failed.",
+        });
+        return;
+      }
+
+      console.log(
+        `[/api/assistant/graph/run] ${service}.${functionName} mutation=${entry.mutation} durationMs=${Date.now() - startedAt}`
+      );
+      response.json({
+        ok: true,
+        service,
+        functionName,
+        mutation: entry.mutation,
+        data,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (error) {
       next(error);
     }

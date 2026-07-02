@@ -13,6 +13,7 @@
     "graph-tester:dev": "node scripts/launch-graph-tester.js --watch",
     "graph-tester:client": "npm --prefix src/graph-tester/client run dev",
     "graph-tester:client:build": "npm --prefix src/graph-tester/client run build",
+    "graph:capabilities": "node scripts/graph-capability-report.js",
     "bundle:localhost": "node scripts/build-localhost-shareable-bundle.js",
     "open:portal-profile": "node scripts/open-portal-profile.js",
     "smoke": "node scripts/smoke-test.js"

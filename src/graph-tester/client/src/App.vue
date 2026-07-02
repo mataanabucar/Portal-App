@@ -12,10 +12,14 @@ const {
   state,
   selectedEntry,
   isAuthenticated,
+  identityMismatch,
   totalFunctions,
+  enabledFunctionCount,
+  disabledFunctionCount,
   init,
   selectFunction,
   refreshSession,
+  setShowUnavailable,
   login,
   logout,
   runFunction,
@@ -27,6 +31,10 @@ onMounted(() => {
 
 function onRun(payload: { args: Record<string, unknown>; confirmMutation: boolean }): void {
   void runFunction(payload.args, payload.confirmMutation);
+}
+
+function onToggleUnavailable(event: Event): void {
+  void setShowUnavailable((event.target as HTMLInputElement).checked);
 }
 </script>
 
@@ -57,6 +65,27 @@ function onRun(payload: { args: Record<string, unknown>; confirmMutation: boolea
       />
     </header>
 
+    <article v-if="identityMismatch" class="error-box">
+      <h3>Token identity mismatch</h3>
+      <p class="result-summary__text">
+        The stored token was issued to
+        "{{ state.session?.claims?.appDisplayName || state.session?.claims?.appId || "an unknown app" }}",
+        not this app registration ({{ state.session?.configClientId }}). Clear the token and log in
+        again through this tester — Graph Explorer / Outlook Web tokens are never used here.
+      </p>
+    </article>
+
+    <article v-if="state.capabilities?.warnings?.length" class="error-box">
+      <h3>Capability warnings</h3>
+      <p
+        v-for="warning in state.capabilities.warnings"
+        :key="warning"
+        class="result-summary__text"
+      >
+        {{ warning }}
+      </p>
+    </article>
+
     <article v-if="state.startupError" class="error-box">
       <h3>Startup failed</h3>
       <p class="result-summary__text">{{ state.startupError }}</p>
@@ -75,6 +104,19 @@ function onRun(payload: { args: Record<string, unknown>; confirmMutation: boolea
             <p class="panel-kicker">1. Choose</p>
             <h2>Service and function</h2>
           </div>
+
+          <p class="field-note">
+            {{ enabledFunctionCount }} enabled ·
+            {{ disabledFunctionCount }} hidden by missing scopes
+          </p>
+          <label class="checkbox-field">
+            <input
+              type="checkbox"
+              :checked="state.showUnavailable"
+              @change="onToggleUnavailable"
+            />
+            <span>Show unavailable functions</span>
+          </label>
 
           <FunctionSearch
             :services="state.catalog"

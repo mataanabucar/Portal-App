@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../loadEnv.js";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { buildConfig } from "./config/env.js";

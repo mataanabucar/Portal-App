@@ -1,5 +1,6 @@
 import {
   GraphTesterRequestError,
+  type CapabilitiesResponse,
   type CatalogResponse,
   type GraphTesterErrorPayload,
   type HealthResponse,
@@ -78,8 +79,13 @@ export const graphTesterApi = {
     return requestJson<HealthResponse>("/api/health");
   },
 
-  getCatalog(): Promise<CatalogResponse> {
-    return requestJson<CatalogResponse>("/api/graph-tester/catalog");
+  getCatalog(includeUnavailable = false): Promise<CatalogResponse> {
+    const query = includeUnavailable ? "?includeUnavailable=true" : "";
+    return requestJson<CatalogResponse>(`/api/graph-tester/catalog${query}`);
+  },
+
+  getCapabilities(): Promise<CapabilitiesResponse> {
+    return requestJson<CapabilitiesResponse>("/api/graph-tester/capabilities");
   },
 
   getSession(): Promise<SessionResponse> {

@@ -19,6 +19,10 @@ import {
   contactsService,
   profileService,
 } from "../../server/services/graph/index.js";
+import {
+  getMissingScopes,
+  isFunctionEnabled,
+} from "../../server/services/graph/graphCapabilities.js";
 import { buildOptions } from "../utils/fieldParsers.js";
 import {
   resolveChatReference,
@@ -147,7 +151,7 @@ const DRAFT_INPUT_SAMPLE = {
   toRecipients: [
     {
       emailAddress: {
-        address: "person@company.com",
+        address: "person@example.com",
       },
     },
   ],
@@ -222,7 +226,11 @@ const SHARED_EVENT_INPUT_SAMPLE = {
 const SEND_MAIL_SAMPLE = {
   subject: "Graph tester test email",
   body: { contentType: "HTML", content: "<p>Sent from the Graph tester.</p>" },
-  toRecipients: [{ emailAddress: { address: "person@company.com" } }],
+  toRecipients: [{ emailAddress: { address: "person@example.com" } }],
+};
+
+const REPLY_SAMPLE = {
+  comment: "Thanks — replying from the Graph tester.",
 };
 
 const FIELD_TYPES = {
@@ -234,6 +242,171 @@ const FIELD_TYPES = {
   json: "json",
   dateTimeLocal: "datetime-local",
 };
+
+// ---------------------------------------------------------------------------
+// Delegated-scope gating
+//
+// Every entry gets requiredScopes: { any: [...], all: [...] }. The server
+// (routes) enforces this against the signed-in token's scp claim — the Vue UI
+// only mirrors it. Entries default to their service's read/write scopes below;
+// SCOPE_OVERRIDES handles functions with different requirements.
+// ---------------------------------------------------------------------------
+
+const SERVICE_SCOPE_DEFAULTS = {
+  user: {
+    read: { any: ["User.Read"] },
+    write: { any: ["User.ReadWrite", "User.ReadWrite.All"] },
+  },
+  calendar: {
+    read: { any: ["Calendars.Read", "Calendars.ReadWrite"] },
+    write: { any: ["Calendars.ReadWrite"] },
+  },
+  mail: {
+    read: { any: ["Mail.Read", "Mail.ReadWrite"] },
+    write: { any: ["Mail.ReadWrite"] },
+  },
+  mailboxSettings: {
+    read: { any: ["MailboxSettings.Read", "MailboxSettings.ReadWrite"] },
+    write: { any: ["MailboxSettings.ReadWrite"] },
+  },
+  teamsChat: {
+    read: { any: ["Chat.Read", "Chat.ReadWrite"] },
+    write: { any: ["Chat.ReadWrite"] },
+  },
+  teamsChannel: {
+    read: { any: ["ChannelMessage.Read.All"] },
+    write: { any: ["ChannelMessage.Send"] },
+  },
+  people: {
+    read: { any: ["People.Read"] },
+    write: { any: ["People.ReadWrite"] },
+  },
+  serviceHealth: {
+    read: { any: ["ServiceHealth.Read.All"] },
+    write: { any: ["ServiceHealth.Read.All"] },
+  },
+  reports: {
+    read: { any: ["Reports.Read.All"] },
+    write: { any: ["Reports.Read.All"] },
+  },
+  directory: {
+    read: { any: ["Directory.Read.All"] },
+    write: { any: ["Directory.ReadWrite.All"] },
+  },
+  groups: {
+    read: { any: ["Group.Read.All", "Group.ReadWrite.All"] },
+    write: { any: ["Group.ReadWrite.All"] },
+  },
+  tasks: {
+    read: { any: ["Tasks.Read", "Tasks.ReadWrite"] },
+    write: { any: ["Tasks.ReadWrite"] },
+  },
+  onenote: {
+    read: { any: ["Notes.Read", "Notes.ReadWrite", "Notes.Read.All", "Notes.ReadWrite.All"] },
+    write: { any: ["Notes.ReadWrite", "Notes.ReadWrite.All"] },
+  },
+  sites: {
+    read: { any: ["Sites.Read.All", "Sites.ReadWrite.All"] },
+    write: { any: ["Sites.ReadWrite.All"] },
+  },
+  files: {
+    read: { any: ["Files.Read", "Files.ReadWrite", "Files.Read.All", "Files.ReadWrite.All"] },
+    write: { any: ["Files.ReadWrite", "Files.ReadWrite.All"] },
+  },
+  contacts: {
+    read: { any: ["Contacts.Read", "Contacts.ReadWrite"] },
+    write: { any: ["Contacts.ReadWrite"] },
+  },
+  calendarShared: {
+    read: { any: ["Calendars.Read.Shared", "Calendars.ReadWrite.Shared"] },
+    write: { any: ["Calendars.ReadWrite.Shared"] },
+  },
+  mailShared: {
+    read: { any: ["Mail.Read.Shared", "Mail.ReadWrite.Shared"] },
+    write: { any: ["Mail.ReadWrite.Shared"] },
+  },
+  profile: {
+    read: { any: ["User.Read"] },
+    write: { any: ["User.ReadWrite"] },
+  },
+};
+
+const SCOPE_OVERRIDES = {
+  // Directory-wide user lookups need more than User.Read.
+  "user:listUsers": { any: ["User.ReadBasic.All", "User.Read.All", "Directory.Read.All"] },
+  "user:searchUsers": { any: ["User.ReadBasic.All", "User.Read.All", "Directory.Read.All"] },
+  "user:getUser": { any: ["User.ReadBasic.All", "User.Read.All", "Directory.Read.All"] },
+  "user:getUserManager": { any: ["User.Read.All", "Directory.Read.All"] },
+  "user:listUserDirectReports": { any: ["User.Read.All", "Directory.Read.All"] },
+  "user:listUserMemberOf": { any: ["User.Read.All", "Directory.Read.All", "GroupMember.Read.All"] },
+  "user:listUserJoinedTeams": { any: ["Team.ReadBasic.All", "TeamMember.Read.All"] },
+
+  // Basic mail listings work with the weakest mail scope.
+  "mail:listMyMessagesBasic": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:listMessages": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:listInboxMessages": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:listMessagesInFolder": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:listUnreadMessages": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:listMailFolders": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:getMailFolder": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:listChildFolders": { any: ["Mail.ReadBasic", "Mail.Read", "Mail.ReadWrite"] },
+  "mail:sendMail": { any: ["Mail.Send"] },
+  "mail:replyToMessage": { any: ["Mail.Send"] },
+  "mail:listSharedMailboxMessages": { any: ["Mail.Read.Shared", "Mail.ReadWrite.Shared"] },
+  "mail:listSharedInboxMessages": { any: ["Mail.ReadBasic.Shared", "Mail.Read.Shared", "Mail.ReadWrite.Shared"] },
+  "mail:createSharedMailboxDraft": { any: ["Mail.ReadWrite.Shared"] },
+
+  // Chat metadata is readable with the basic scope; sending needs
+  // ChatMessage.Send explicitly (Chat.ReadWrite alone is not assumed).
+  "teamsChat:listMyChats": { any: ["Chat.ReadBasic", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:searchMyChats": { any: ["Chat.ReadBasic", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:getChat": { any: ["Chat.ReadBasic", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:listChatMembers": { any: ["ChatMember.Read", "Chat.ReadBasic", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:getChatMember": { any: ["ChatMember.Read", "Chat.ReadBasic", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:createOneOnOneChat": { any: ["Chat.Create", "Chat.ReadWrite"] },
+  "teamsChat:createGroupChat": { any: ["Chat.Create", "Chat.ReadWrite"] },
+  "teamsChat:listChatMessages": { any: ["ChatMessage.Read", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:listAllChatMessages": { any: ["ChatMessage.Read", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:getChatMessage": { any: ["ChatMessage.Read", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:listChatMessageHostedContents": { any: ["ChatMessage.Read", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:getChatMessageHostedContent": { any: ["ChatMessage.Read", "Chat.Read", "Chat.ReadWrite"] },
+  "teamsChat:listChatTabs": { any: ["TeamsTab.Read.All", "TeamsTab.ReadWrite.All"] },
+  "teamsChat:listChatInstalledApps": { any: ["TeamsAppInstallation.ReadForChat"] },
+  "teamsChat:sendChatMessage": { any: ["ChatMessage.Send"] },
+
+  "teamsChannel:sendChannelMessage": { any: ["ChannelMessage.Send"] },
+  "teamsChannel:editOwnChannelMessage": { any: ["ChannelMessage.Edit"] },
+
+  "mailShared:sendSharedMailboxMail": { any: ["Mail.Send.Shared"] },
+
+  "directory:listApplications": { any: ["Application.Read.All", "Directory.Read.All"] },
+  "directory:getApplication": { any: ["Application.Read.All", "Directory.Read.All"] },
+  "directory:listDevices": { any: ["Device.Read.All", "Directory.Read.All"] },
+  "directory:getDevice": { any: ["Device.Read.All", "Directory.Read.All"] },
+  "directory:getOrganization": { any: ["Organization.Read.All", "Directory.Read.All"] },
+  "directory:listSubscribedSkus": { any: ["Organization.Read.All", "Directory.Read.All"] },
+  "directory:listDomains": { any: ["Domain.Read.All", "Directory.Read.All"] },
+  "directory:getDomain": { any: ["Domain.Read.All", "Directory.Read.All"] },
+
+  "groups:addGroupMember": { any: ["GroupMember.ReadWrite.All", "Group.ReadWrite.All"] },
+
+  "onenote:createPage": { any: ["Notes.Create", "Notes.ReadWrite", "Notes.ReadWrite.All"] },
+
+  "contacts:listUserContacts": { any: ["Contacts.Read.Shared", "Contacts.ReadWrite.Shared"] },
+  "contacts:getUserContact": { any: ["Contacts.Read.Shared", "Contacts.ReadWrite.Shared"] },
+
+  "files:listAppFolderChildren": { any: ["Files.ReadWrite.AppFolder", "Files.ReadWrite", "Files.ReadWrite.All"] },
+};
+
+// Not exposed regardless of granted scopes — add back intentionally later.
+const HIDDEN_FUNCTIONS = new Set([
+  "teamsChannel:listChannels",
+  "teamsChannel:getChannel",
+  "teamsChannel:listChannelMessages",
+  "teamsChannel:getChannelMessage",
+  "teamsChannel:sendChannelReply",
+  "teamsChannel:editChannelReply",
+]);
 
 const GRAPH_TESTER_CATALOG = [
   defineEntry({
@@ -1471,6 +1644,165 @@ const GRAPH_TESTER_CATALOG = [
       ),
   }),
   defineEntry({
+    service: "mail",
+    functionName: "readMessage",
+    label: "Read message",
+    description: "Read a single message by ID or subject text (alias for getMessage).",
+    outputHint: "mailMessage",
+    requiredFields: ["messageId"],
+    fields: [
+      textField("messageId", "Message ID or subject", {
+        required: true,
+        placeholder: "Quarterly budget update",
+        description:
+          "Accepts a raw message ID or a human-friendly subject search.",
+      }),
+      textField("select", "$select", {
+        placeholder: "id,subject,from,receivedDateTime,isRead,body",
+      }),
+    ],
+    invoke: async (token, args) =>
+      mailService.readMessage(
+        token,
+        await resolveMessageReference(token, args.messageId),
+        buildOptions(args, ["select"])
+      ),
+  }),
+  defineEntry({
+    service: "mail",
+    functionName: "searchMessages",
+    label: "Search messages (alias)",
+    description: "Full-text message search (alias for searchMyMessages).",
+    outputHint: "mailMessages",
+    requiredFields: ["text"],
+    defaults: {
+      top: 10,
+      select: "id,subject,from,receivedDateTime,isRead,bodyPreview",
+    },
+    fields: [
+      textField("text", "Message subject or text", {
+        required: true,
+        placeholder: "expense report",
+      }),
+      numberField("top", "$top", {
+        placeholder: "10",
+      }),
+      textField("select", "$select", {
+        placeholder: "id,subject,from,receivedDateTime,isRead,bodyPreview",
+      }),
+    ],
+    invoke: (token, args) =>
+      mailService.searchMessages(token, args.text, buildOptions(args, ["top", "select"])),
+  }),
+  defineEntry({
+    service: "mail",
+    functionName: "readConversation",
+    label: "Read conversation",
+    description:
+      "Read every message in a conversation thread, oldest first, by conversationId.",
+    outputHint: "mailMessages",
+    requiredFields: ["conversationId"],
+    defaults: {
+      top: 25,
+      select: "id,subject,from,receivedDateTime,bodyPreview,conversationId",
+    },
+    fields: [
+      textField("conversationId", "Conversation ID", {
+        required: true,
+        placeholder: "AAQkAG...",
+        description: "The conversationId from any message in the thread.",
+      }),
+      numberField("top", "$top", {
+        placeholder: "25",
+      }),
+      textField("select", "$select", {
+        placeholder: "id,subject,from,receivedDateTime,bodyPreview",
+      }),
+    ],
+    invoke: (token, args) =>
+      mailService.readConversation(
+        token,
+        args.conversationId,
+        buildOptions(args, ["top", "select"])
+      ),
+  }),
+  defineEntry({
+    service: "mail",
+    functionName: "createDraft",
+    label: "Create draft (alias)",
+    description: "Create a draft message (alias for createDraftMessage).",
+    mutation: true,
+    outputHint: "mailMessage",
+    requiredFields: ["draftInput"],
+    samplePayloads: {
+      draftInput: [{ label: "Draft payload", value: DRAFT_INPUT_SAMPLE }],
+    },
+    fields: [
+      jsonField("draftInput", "Draft JSON", {
+        required: true,
+        rows: 12,
+      }),
+    ],
+    invoke: (token, args) => mailService.createDraft(token, args.draftInput),
+  }),
+  defineEntry({
+    service: "mail",
+    functionName: "sendMail",
+    label: "Send mail",
+    description: "Send an email as the signed-in user via /me/sendMail.",
+    mutation: true,
+    outputHint: "mutationAck",
+    requiredFields: ["messageInput"],
+    defaults: {
+      saveToSentItems: true,
+    },
+    samplePayloads: {
+      messageInput: [{ label: "Sample email", value: SEND_MAIL_SAMPLE }],
+    },
+    fields: [
+      jsonField("messageInput", "Message JSON", {
+        required: true,
+        rows: 12,
+        description: "Message object (without the outer 'message' wrapper).",
+      }),
+      booleanField("saveToSentItems", "Save to Sent Items"),
+    ],
+    invoke: (token, args) =>
+      mailService.sendMail(token, args.messageInput, {
+        saveToSentItems: args.saveToSentItems,
+      }),
+  }),
+  defineEntry({
+    service: "mail",
+    functionName: "replyToMessage",
+    label: "Reply to message",
+    description: "Reply to a message as the signed-in user via /reply.",
+    mutation: true,
+    outputHint: "mutationAck",
+    requiredFields: ["messageId", "comment"],
+    samplePayloads: {
+      comment: [{ label: "Reply comment", value: REPLY_SAMPLE.comment }],
+    },
+    fields: [
+      textField("messageId", "Message ID or subject", {
+        required: true,
+        placeholder: "Quarterly budget update",
+        description: "Accepts a raw message ID or a friendly subject lookup.",
+      }),
+      textareaField("comment", "Reply comment", {
+        required: true,
+        rows: 5,
+        placeholder: "Thanks — replying from the Graph tester.",
+      }),
+    ],
+    invoke: async (token, args) =>
+      mailService.replyToMessage(
+        token,
+        await resolveMessageReference(token, args.messageId),
+        args.comment
+      ),
+  }),
+  defineEntry({
     service: "mailboxSettings",
     functionName: "getMyMailboxSettings",
     label: "Get mailbox settings",
@@ -2061,8 +2393,8 @@ const GRAPH_TESTER_CATALOG = [
   }),
   defineEntry({
     service: "teamsChannel",
-    functionName: "editChannelMessage",
-    label: "Edit channel message",
+    functionName: "editOwnChannelMessage",
+    label: "Edit own channel message",
     description: "Edit a channel message sent by the signed-in user.",
     mutation: true,
     outputHint: "chatMessage",
@@ -2783,6 +3115,19 @@ const GRAPH_TESTER_CATALOG = [
   }),
   defineEntry({
     service: "tasks",
+    functionName: "listTaskLists",
+    label: "List task lists (alias)",
+    description: "List all To Do task lists (alias for listTodoLists).",
+    outputHint: "generic",
+    defaults: { select: "id,displayName,isOwner,isShared,wellknownListName" },
+    fields: [
+      textField("select", "$select", { placeholder: "id,displayName,isOwner,wellknownListName" }),
+    ],
+    invoke: (token, args) =>
+      tasksService.listTodoLists(token, buildOptions(args, ["select"])),
+  }),
+  defineEntry({
+    service: "tasks",
     functionName: "getTodoList",
     label: "Get To Do list",
     description: "Load one To Do task list by ID.",
@@ -2857,6 +3202,20 @@ const GRAPH_TESTER_CATALOG = [
       jsonField("patch", "Patch JSON", { required: true, rows: 8 }),
     ],
     invoke: (token, args) => tasksService.updateTask(token, args.listId, args.taskId, args.patch),
+  }),
+  defineEntry({
+    service: "tasks",
+    functionName: "completeTask",
+    label: "Complete task",
+    description: "Mark a task as completed (status patch).",
+    mutation: true,
+    outputHint: "generic",
+    requiredFields: ["listId", "taskId"],
+    fields: [
+      textField("listId", "List ID", { required: true, placeholder: "AQMkAG..." }),
+      textField("taskId", "Task ID", { required: true, placeholder: "AQMkAH..." }),
+    ],
+    invoke: (token, args) => tasksService.completeTask(token, args.listId, args.taskId),
   }),
   defineEntry({
     service: "onenote",
@@ -3559,20 +3918,6 @@ const GRAPH_TESTER_CATALOG = [
   }),
   defineEntry({
     service: "mailShared",
-    functionName: "sendMail",
-    label: "Send mail",
-    description: "Send an email from the signed-in user's mailbox via /me/sendMail.",
-    mutation: true,
-    outputHint: "mutationAck",
-    requiredFields: ["messageInput"],
-    samplePayloads: { messageInput: [{ label: "Sample email", value: SEND_MAIL_SAMPLE }] },
-    fields: [
-      jsonField("messageInput", "Message JSON", { required: true, rows: 12, description: "Message object (without the outer 'message' wrapper)." }),
-    ],
-    invoke: (token, args) => mailService.sendMail(token, args.messageInput),
-  }),
-  defineEntry({
-    service: "mailShared",
     functionName: "sendSharedMailboxMail",
     label: "Send shared mailbox mail",
     description: "Send an email from a shared mailbox using delegated permissions.",
@@ -3687,20 +4032,48 @@ export function getCatalogEntry(service, functionName) {
   return CATALOG_INDEX.get(buildCatalogKey(service, functionName)) || null;
 }
 
-export function getClientCatalog() {
-  return Object.entries(SERVICE_METADATA).map(([serviceKey, metadata]) => ({
-    key: serviceKey,
-    label: metadata.label,
-    description: metadata.description,
-    functions: GRAPH_TESTER_CATALOG.filter((entry) => entry.service === serviceKey).map(
-      serializeCatalogEntry
-    ),
-  }));
+/** Flat entry list (hidden included) for capability reporting. */
+export function getFlatCatalog() {
+  return GRAPH_TESTER_CATALOG;
 }
 
-function serializeCatalogEntry(entry) {
+/**
+ * Catalog for the client, gated by the signed-in token's delegated scopes.
+ * Hidden entries never appear. Disabled entries (missing scopes) are excluded
+ * unless includeUnavailable is set, in which case they carry enabled: false
+ * and their missingScopes.
+ */
+export function getClientCatalog(grantedScopes = [], { includeUnavailable = false } = {}) {
+  return Object.entries(SERVICE_METADATA)
+    .map(([serviceKey, metadata]) => ({
+      key: serviceKey,
+      label: metadata.label,
+      description: metadata.description,
+      functions: GRAPH_TESTER_CATALOG.filter(
+        (entry) => entry.service === serviceKey && !entry.hidden
+      )
+        .map((entry) => serializeCatalogEntry(entry, grantedScopes))
+        .filter((entry) => entry.enabled || includeUnavailable),
+    }))
+    .filter((service) => service.functions.length > 0);
+}
+
+/** Scope check used by the run endpoint — server-side enforcement. */
+export function isCatalogEntryEnabled(entry, grantedScopes = []) {
+  return isFunctionEnabled(entry, grantedScopes);
+}
+
+export function getCatalogEntryMissingScopes(entry, grantedScopes = []) {
+  return getMissingScopes(entry, grantedScopes);
+}
+
+function serializeCatalogEntry(entry, grantedScopes = []) {
   const { invoke, ...serializableEntry } = entry;
-  return serializableEntry;
+  return {
+    ...serializableEntry,
+    enabled: isFunctionEnabled(entry, grantedScopes),
+    missingScopes: getMissingScopes(entry, grantedScopes),
+  };
 }
 
 function buildCatalogKey(service, functionName) {
@@ -3709,6 +4082,14 @@ function buildCatalogKey(service, functionName) {
 
 function defineEntry(definition) {
   const metadata = SERVICE_METADATA[definition.service];
+  const catalogKey = buildCatalogKey(definition.service, definition.functionName);
+  const serviceDefaults = SERVICE_SCOPE_DEFAULTS[definition.service] || {};
+  const requiredScopes = normalizeRequiredScopes(
+    definition.requiredScopes ||
+      SCOPE_OVERRIDES[catalogKey] ||
+      (definition.mutation ? serviceDefaults.write : serviceDefaults.read)
+  );
+
   const entry = {
     serviceLabel: metadata.label,
     serviceDescription: metadata.description,
@@ -3718,7 +4099,9 @@ function defineEntry(definition) {
     defaults: {},
     samplePayloads: {},
     outputHint: "generic",
+    hidden: HIDDEN_FUNCTIONS.has(catalogKey),
     ...definition,
+    requiredScopes,
     requiredFields:
       definition.requiredFields ||
       definition.fields?.filter((field) => field.required).map((field) => field.name) ||
@@ -3726,6 +4109,13 @@ function defineEntry(definition) {
   };
 
   return applySelectMetadata(entry);
+}
+
+function normalizeRequiredScopes(requiredScopes) {
+  return {
+    any: requiredScopes?.any || [],
+    all: requiredScopes?.all || [],
+  };
 }
 
 function applySelectMetadata(entry) {

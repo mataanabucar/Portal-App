@@ -73,6 +73,7 @@ const REALTIME_PRESET_KEY = "realtime-preset-id";
 const MIC_CLEANUP_SETTINGS_KEY = "realtime-mic-cleanup-settings";
 const EMAIL_MAX_ATTACHMENTS = 5;
 const EMAIL_MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const VOICE_SEND_EMAIL_CONFIRM_COMMAND = "yes send it now";
 
 interface UseRealtimeAssistantOptions {
   items: DashboardCardItem[];
@@ -115,6 +116,18 @@ interface SearchToolArgs {
 
 interface RecentEmailsToolArgs {
   limit?: unknown;
+}
+
+interface GraphFunctionListArgs {
+  service?: unknown;
+  search?: unknown;
+}
+
+interface GraphFunctionRunArgs {
+  service?: unknown;
+  functionName?: unknown;
+  args?: unknown;
+  confirmMutation?: unknown;
 }
 
 export function useRealtimeAssistant({
@@ -252,6 +265,10 @@ export function useRealtimeAssistant({
 
   const handleTranscript = useEffectEvent((event: RealtimeTranscriptEvent) => {
     setMessages((current) => upsertRealtimeMessage(current, event));
+
+    if (event.role === "user" && event.done) {
+      void maybeConfirmPendingEmailFromVoiceCommand(event.text);
+    }
   });
 
   const handleToolCall = useEffectEvent(
@@ -277,6 +294,10 @@ export function useRealtimeAssistant({
           return runSearchChats(args as SearchToolArgs);
         case "get_recent_emails":
           return runGetRecentEmails(args as RecentEmailsToolArgs);
+        case "list_graph_functions":
+          return runListGraphFunctions(args as GraphFunctionListArgs);
+        case "run_graph_function":
+          return runGraphFunction(args as GraphFunctionRunArgs);
         default:
           return { ok: false, error: `Unknown tool: ${toolName}` };
       }
@@ -732,6 +753,87 @@ export function useRealtimeAssistant({
     return { ok: true, count: payload.count ?? results.length, results };
   }
 
+  // Full Graph catalog for the assistant. The server owns the allowlist and
+  // scope gating; these calls just relay the tool arguments.
+  async function runListGraphFunctions({ service, search }: GraphFunctionListArgs) {
+    const params = new URLSearchParams();
+    const normalizedService = normalizeText(service);
+    const normalizedSearch = normalizeText(search);
+    if (normalizedService) params.set("service", normalizedService);
+    if (normalizedSearch) params.set("search", normalizedSearch);
+
+    const query = params.toString();
+    const response = await fetch(
+      `/api/assistant/graph/functions${query ? `?${query}` : ""}`
+    );
+    const payload = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      services?: unknown[];
+    };
+
+    if (!response.ok || payload.ok === false) {
+      return { ok: false, error: payload.error || response.statusText };
+    }
+
+    return { ok: true, services: payload.services ?? [] };
+  }
+
+  async function runGraphFunction({
+    service,
+    functionName,
+    args,
+    confirmMutation,
+  }: GraphFunctionRunArgs) {
+    const normalizedService = normalizeText(service);
+    const normalizedFunction = normalizeText(functionName);
+    if (!normalizedService || !normalizedFunction) {
+      return {
+        ok: false,
+        error: "run_graph_function requires both service and functionName.",
+      };
+    }
+
+    const response = await fetch("/api/assistant/graph/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service: normalizedService,
+        functionName: normalizedFunction,
+        args: args && typeof args === "object" ? args : {},
+        confirmMutation: confirmMutation === true,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      missingScopes?: string[];
+      requiresConfirmation?: boolean;
+      data?: unknown;
+      mutation?: boolean;
+    };
+
+    if (!response.ok || payload.ok === false) {
+      // Structured errors (missing scopes, confirmation required) go back to
+      // the model so it can explain or ask Mataan to confirm.
+      return {
+        ok: false,
+        error: payload.error || response.statusText,
+        missingScopes: payload.missingScopes,
+        requiresConfirmation: payload.requiresConfirmation,
+      };
+    }
+
+    return {
+      ok: true,
+      service: normalizedService,
+      functionName: normalizedFunction,
+      mutation: payload.mutation === true,
+      data: payload.data ?? null,
+    };
+  }
+
   async function runGraphSearch(
     path: string,
     query: unknown,
@@ -805,11 +907,11 @@ export function useRealtimeAssistant({
       to: recipients,
       cc: ccRecipients,
       subject: normalizedSubject,
-      note: "Email staged. It will only be sent after Mataan confirms it in the portal UI.",
+      note: `Email staged. It will only be sent after Mataan says "${VOICE_SEND_EMAIL_CONFIRM_COMMAND}" or confirms it in the portal UI.`,
     };
   }
 
-  async function confirmSendEmail() {
+  async function confirmSendEmail(source: "ui" | "voice" = "ui") {
     const draft = pendingEmail;
     if (!draft || emailStatus.state === "sending") {
       return;
@@ -859,7 +961,7 @@ export function useRealtimeAssistant({
       // Best-effort: tell the assistant the outcome (minimal metadata only).
       try {
         clientRef.current?.sendSystemNote(
-          `Email send confirmed by Mataan. status=sent messageId=${payload.messageId ?? "unknown"}.`
+          `Email send confirmed by Mataan via ${source}. status=sent messageId=${payload.messageId ?? "unknown"}.`
         );
       } catch {
         // The session may be closed; the UI already reflects the result.
@@ -880,6 +982,18 @@ export function useRealtimeAssistant({
     } catch {
       // No active session — nothing to notify.
     }
+  }
+
+  async function maybeConfirmPendingEmailFromVoiceCommand(text: string) {
+    if (!pendingEmail || emailStatus.state !== "awaiting") {
+      return;
+    }
+
+    if (!isVoiceSendEmailConfirmCommand(text)) {
+      return;
+    }
+
+    await confirmSendEmail("voice");
   }
 
   async function addEmailAttachment(file: File) {
@@ -1028,6 +1142,10 @@ function formatToolLabel(toolName: string) {
       return "Searching Teams chats...";
     case "send_email":
       return "Preparing email...";
+    case "list_graph_functions":
+      return "Checking Microsoft 365 functions...";
+    case "run_graph_function":
+      return "Running Microsoft 365 action...";
     default:
       return "Running tool...";
   }
@@ -1054,6 +1172,18 @@ function normalizeEmailRecipients(value: unknown): string[] {
     }
   }
   return out;
+}
+
+function isVoiceSendEmailConfirmCommand(value: string) {
+  return normalizeVoiceCommand(value) === VOICE_SEND_EMAIL_CONFIRM_COMMAND;
+}
+
+function normalizeVoiceCommand(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function fileToBase64(file: File): Promise<string> {
