@@ -23,7 +23,7 @@ export type TonePresetKey = keyof typeof TTS_TONE_PRESETS;
 export type TtsState = "idle" | "loading" | "playing";
 
 export const VOICE_REPLAY_TTS_INSTRUCTIONS =
-  "Read this like a smart, warm, playful girlfriend giving Mataan a clear work briefing. Keep it sexy-friendly, confident, personal, and work-appropriate. Use natural pauses, make the next steps easy to follow, and do not sound vulgar, theatrical, or overly dramatic.";
+  'Read this like a smart, warm, playful girlfriend giving Mataan a clear work briefing. Whenever you say his name aloud, pronounce "Mataan" as "muh-TAWN" while keeping the normal spelling in text. Keep it sexy-friendly, confident, personal, and work-appropriate. Use natural pauses, make the next steps easy to follow, and do not sound vulgar, theatrical, or overly dramatic.';
 
 let currentAudio: HTMLAudioElement | null = null;
 let currentObjectUrl: string | null = null;

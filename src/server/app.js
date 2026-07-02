@@ -381,6 +381,8 @@ const VOICE_REPLAY_CONTEXT_MAX_CHARS = 14000;
 const VOICE_REPLAY_SCRIPT_MAX_CHARS = 4500;
 const REALTIME_MAX_OUTPUT_TOKENS_LIMIT = 4096;
 const REALTIME_MAX_OFFER_SDP_CHARS = 100 * 1024;
+const MATAAN_PRONUNCIATION_RULE =
+  'When saying Mataan aloud, always pronounce his name as "muh-TAWN". Keep the normal spelling "Mataan" in visible text unless he explicitly asks for phonetic spelling.';
 const ttsCache = new Map();
 
 function cleanTtsText(text) {
@@ -390,6 +392,18 @@ function cleanTtsText(text) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, TTS_MAX_CHARS);
+}
+
+function appendMataanPronunciationRule(instructions) {
+  const normalized =
+    typeof instructions === "string" ? instructions.replace(/\s+/g, " ").trim() : "";
+  if (!normalized) {
+    return MATAAN_PRONUNCIATION_RULE;
+  }
+  if (normalized.includes(MATAAN_PRONUNCIATION_RULE)) {
+    return normalized;
+  }
+  return `${normalized} ${MATAAN_PRONUNCIATION_RULE}`;
 }
 
 function ttsSetCache(key, buffer) {
@@ -436,6 +450,7 @@ function buildVoiceReplayPrompt(reportText, cardJson) {
     "Tone rules:",
     "",
     "Call me Mataan by default.",
+    'When using my name, keep the spelling "Mataan" but treat its spoken pronunciation as "muh-TAWN".',
     "Use babe only for light encouragement or reassurance.",
     "Keep it sexy-friendly, playful, warm, and personal, but still work-appropriate.",
     "Make it sound like a smart girlfriend helping me understand what matters.",
@@ -458,6 +473,7 @@ function buildRealtimeAssistantInstructions(hasPersona = false) {
   const lines = [
     "You are Mataan's realtime AI work assistant, embedded in his portal dashboard.",
     "You are a fully capable AI assistant with broad general knowledge and strong reasoning.",
+    'Whenever you say Mataan\'s name aloud, pronounce it "muh-TAWN". Keep the normal spelling "Mataan" in text unless he asks for phonetics.',
     "Use that knowledge freely: explain concepts, help debug code and errors, brainstorm, draft and rewrite text, do analysis, and reason through problems like a sharp, knowledgeable colleague.",
     "Never claim you lack knowledge or can 'only use portal tools' — you have full general knowledge in addition to the live portal context and tools.",
     "On top of that, you have live access to Mataan's portal work queue: the dashboard context provided to you in this session, plus read-only tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question, search_docs).",
@@ -2077,7 +2093,11 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
 
       const preset = TTS_TONE_PRESETS[tonePreset] ?? TTS_TONE_PRESETS.warmExecutive;
       const finalVoice = (typeof reqVoice === "string" && reqVoice.trim()) ? reqVoice.trim() : preset.voice;
-      const finalInstructions = (typeof reqInstructions === "string" && reqInstructions.trim()) ? reqInstructions.trim() : preset.instructions;
+      const finalInstructions = appendMataanPronunciationRule(
+        (typeof reqInstructions === "string" && reqInstructions.trim())
+          ? reqInstructions.trim()
+          : preset.instructions
+      );
       const finalSpeed = (typeof reqSpeed === "number" && reqSpeed >= 0.25 && reqSpeed <= 4.0) ? reqSpeed : null;
       const finalVolume = (typeof reqVolume === "number" && reqVolume >= 0.1 && reqVolume <= 3.0) ? reqVolume : 1.0;
       const finalAfChain = isSafeFfmpegChain(reqAfChain) ? reqAfChain.trim() : null;
