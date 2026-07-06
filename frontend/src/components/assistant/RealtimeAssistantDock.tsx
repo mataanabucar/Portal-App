@@ -29,6 +29,7 @@ import {
   GennyBotMascot,
   type GennyBotState,
 } from "@/components/assistant/GennyBotMascot";
+import { AssistantChatPanel } from "@/components/assistant/AssistantChatPanel";
 import {
   useRealtimeAssistant,
   type EmailSendStatus,
@@ -101,6 +102,7 @@ export function RealtimeAssistantDock({
   refresh,
 }: RealtimeAssistantDockProps) {
   const [expanded, setExpanded] = useState(false);
+  const [assistantMode, setAssistantMode] = useState<"voice" | "text">("voice");
   const [showMicPanel, setShowMicPanel] = useState(false);
   const [draft, setDraft] = useState("");
   const [manualBotState, setManualBotState] = useState<GennyBotState | null>(null);
@@ -231,6 +233,17 @@ export function RealtimeAssistantDock({
       window.removeEventListener("resize", handleResize);
     };
   }, []);
+
+  // Re-clamp once the panel switches between collapsed (icon-sized) and
+  // expanded (much larger) — otherwise a position clamped for the small
+  // collapsed icon can leave the expanded panel's far edge off-screen.
+  useEffect(() => {
+    const frameId = window.requestAnimationFrame(() => {
+      syncFloatingWidget();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [expanded]);
 
   useEffect(() => {
     if (errorSignal) {
@@ -421,6 +434,34 @@ export function RealtimeAssistantDock({
               </button>
             </div>
 
+            <div className="mt-4 flex gap-1 rounded-full border border-slate-800/80 bg-slate-950/50 p-1">
+              <button
+                type="button"
+                onClick={() => setAssistantMode("voice")}
+                className={cn(
+                  "flex-1 rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors",
+                  assistantMode === "voice"
+                    ? "bg-cyan-500 text-slate-950"
+                    : "text-slate-400 hover:text-slate-200"
+                )}
+              >
+                Voice
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssistantMode("text")}
+                className={cn(
+                  "flex-1 rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors",
+                  assistantMode === "text"
+                    ? "bg-cyan-500 text-slate-950"
+                    : "text-slate-400 hover:text-slate-200"
+                )}
+              >
+                Text
+              </button>
+            </div>
+
+            {assistantMode === "voice" && (
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <StatusBadge connected={isConnected} status={status} />
               {activeToolName && (
@@ -430,7 +471,10 @@ export function RealtimeAssistantDock({
                 </span>
               )}
             </div>
+            )}
 
+            {assistantMode === "voice" && (
+            <>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 variant={isConnected ? "outline" : "default"}
@@ -538,8 +582,15 @@ export function RealtimeAssistantDock({
                 />
               )}
             </div>
+            </>
+            )}
           </div>
 
+          {assistantMode === "text" ? (
+          <div className="flex min-h-0 flex-1 flex-col px-4 py-4">
+            <AssistantChatPanel />
+          </div>
+          ) : (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
             <EmailConfirmation
               pendingEmail={pendingEmail}
@@ -644,6 +695,7 @@ export function RealtimeAssistantDock({
               </p>
             )}
           </div>
+          )}
         </section>
       ) : (
         <div className="flex flex-col items-center gap-3">

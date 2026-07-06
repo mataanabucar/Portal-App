@@ -13,7 +13,11 @@ import { createPortalGraphAuth } from "./services/graph/portalGraphAuth.js";
 import { createKbService } from "./services/kb/index.js";
 import { createSourcebotService } from "./services/sourcebot/index.js";
 import { createDocsKbService } from "./services/docsKb/index.js";
+import { createCodeKbService } from "./services/codeKb/index.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
+import { createModelProvider } from "./services/ai/modelProvider.js";
+import { createInMemoryPendingActionStore } from "./services/assistant/pendingActions.js";
+import { createAssistantController } from "./services/assistant/controller.js";
 
 export function startServer(overrides = {}) {
   const config = buildConfig(overrides);
@@ -23,6 +27,16 @@ export function startServer(overrides = {}) {
   const kbService = createKbService(config, { teamGptAuthService });
   const sourcebotService = createSourcebotService(config);
   const docsKbService = createDocsKbService(config);
+  const codeKbService = createCodeKbService(config);
+  const assistantModelProvider = createModelProvider(config);
+  const assistantPendingActionStore = createInMemoryPendingActionStore();
+  const assistantController = createAssistantController(config, {
+    graphAuth,
+    docsKbService,
+    codeKbService,
+    pendingActionStore: assistantPendingActionStore,
+    modelProvider: assistantModelProvider,
+  });
   const app = createApp({
     config,
     portalService,
@@ -34,7 +48,11 @@ export function startServer(overrides = {}) {
     kbService,
     sourcebotService,
     docsKbService,
+    codeKbService,
     teamGptAuthService,
+    assistantModelProvider,
+    assistantPendingActionStore,
+    assistantController,
   });
   let disposed = false;
 

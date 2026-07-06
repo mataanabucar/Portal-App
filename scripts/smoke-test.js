@@ -15,6 +15,7 @@ const ALLOWED_OPENAI_RECORD_KEYS = [
   "Business",
   "Due Date",
   "Detail",
+  "Email Context",
   "IssueItem",
   "Owner",
   "Priority",
@@ -74,6 +75,7 @@ async function runMockScenario() {
   const { server, ready, dispose } = startServer({
     port: 0,
     portalSourceMode: "mock",
+    askProvider: "openai",
     openAiEnabled: false,
     openAiApiKey: ""
   });

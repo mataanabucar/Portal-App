@@ -5,9 +5,10 @@ import {
 } from "../services/graph/graphCapabilities.js";
 
 export function buildConfig(overrides = {}) {
-  // Master AI provider switch. Toggle every feature (parser, summary, ask) at
-  // once via AI_PROVIDER in .env (openai | teamgpt). Per-feature vars
+  // Master AI provider switch. Toggle parser/summary/ask at once via
+  // AI_PROVIDER in .env (openai | teamgpt). Per-feature vars
   // (PARSER_PROVIDER, SUMMARY_PROVIDER, ASK_PROVIDER) override it when set.
+  // ASK_PROVIDER additionally supports "local" for direct Ollama-backed ask.
   const defaultAiProvider = normalizeAiProvider(process.env.AI_PROVIDER, "openai");
   const openAiModel = process.env.OPENAI_MODEL || "merlin";
   const baseConfig = {
@@ -89,7 +90,7 @@ export function buildConfig(overrides = {}) {
     openAiRealtimeNoiseReduction:
       process.env.OPENAI_REALTIME_NOISE_REDUCTION || "near_field",
     summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, defaultAiProvider),
-    askProvider: normalizeAiProvider(process.env.ASK_PROVIDER, defaultAiProvider),
+    askProvider: normalizeAskProvider(process.env.ASK_PROVIDER, defaultAiProvider),
     parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, defaultAiProvider),
     teamGptPageUrl:
       process.env.TEAMGPT_PAGE_URL ||
@@ -144,7 +145,36 @@ export function buildConfig(overrides = {}) {
     // and still requires Mail.Send + Mail.ReadWrite in GRAPH_SCOPES and the token.
     graphMailSendEnabled: process.env.GRAPH_MAIL_SEND_ENABLED === "true",
     graphTokenCacheFile: process.env.GRAPH_TOKEN_CACHE_FILE || ".local-auth/graph-tester-token.json",
-    teamGptTokenCacheFile: process.env.TEAMGPT_TOKEN_CACHE_FILE || ".local-auth/teamgpt-token.json"
+    teamGptTokenCacheFile: process.env.TEAMGPT_TOKEN_CACHE_FILE || ".local-auth/teamgpt-token.json",
+
+    // Assistant chat model (local Ollama or cloud OpenAI-compatible). Independent
+    // of AI_PROVIDER above, which only drives the existing summarizer/parser/ask
+    // features (openai | teamgpt). TeamGPT is intentionally not wired into the
+    // assistant's tool-calling path.
+    assistantModelMode: normalizeLocalCloud(process.env.ASSISTANT_MODEL_MODE, "cloud"),
+    assistantMaxToolRounds: Number.parseInt(process.env.ASSISTANT_MAX_TOOL_ROUNDS || "4", 10),
+    localLlmBaseUrl: process.env.LOCAL_LLM_BASE_URL || "http://localhost:11434/v1",
+    // Empirically verified against this Ollama install (see CodeLogs): both
+    // qwen2.5-coder:7b (writes a tool-call-shaped JSON blob as plain content
+    // instead of populating tool_calls) and devstral-small-2:latest (24B —
+    // correct format, but too slow for a multi-round loop; >5 min with no
+    // response) were unreliable despite being tagged "tools"-capable by
+    // Ollama. llama3.2:3b reliably emits real tool_calls and responds fast.
+    localLlmModel: process.env.LOCAL_LLM_MODEL || "llama3.2:3b",
+    localLlmApiKey: process.env.LOCAL_LLM_API_KEY || "ollama",
+    cloudLlmProvider: process.env.CLOUD_LLM_PROVIDER || "openai",
+    cloudLlmApiKey: process.env.CLOUD_LLM_API_KEY || "",
+    cloudLlmModel: process.env.CLOUD_LLM_MODEL || "",
+
+    // Assistant embeddings (docs + code search). Independent of the chat model
+    // mode above so local chat can pair with cloud embeddings or vice versa.
+    assistantEmbeddingMode: normalizeLocalCloud(process.env.ASSISTANT_EMBEDDING_MODE, "cloud"),
+    localEmbeddingBaseUrl: process.env.LOCAL_EMBEDDING_BASE_URL || "http://localhost:11434/v1",
+    localEmbeddingModel: process.env.LOCAL_EMBEDDING_MODEL || "nomic-embed-text",
+    localEmbeddingApiKey: process.env.LOCAL_EMBEDDING_API_KEY || "ollama",
+    cloudEmbeddingProvider: process.env.CLOUD_EMBEDDING_PROVIDER || "openai",
+    cloudEmbeddingApiKey: process.env.CLOUD_EMBEDDING_API_KEY || "",
+    cloudEmbeddingModel: process.env.CLOUD_EMBEDDING_MODEL || "text-embedding-3-small"
   };
 
   return { ...baseConfig, ...overrides };
@@ -157,7 +187,17 @@ function normalizeAiProvider(value, fallback) {
     : fallback;
 }
 
+function normalizeAskProvider(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "local" ? "local" : normalizeAiProvider(normalized, fallback);
+}
+
 function normalizeOnOffOption(value, fallback) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   return normalized === "on" || normalized === "off" ? normalized : fallback;
+}
+
+function normalizeLocalCloud(value, fallback) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "local" || normalized === "cloud" ? normalized : fallback;
 }

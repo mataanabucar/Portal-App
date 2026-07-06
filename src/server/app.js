@@ -36,6 +36,7 @@ import { enrichRecordsWithEmail } from "./services/graph/itemEmailEnricher.js";
 import { registerKbDebugRoutes } from "./services/kb/debugRoutes.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
+import { buildFriendlyCapabilities } from "./services/graph/assistantCapabilities.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
 
@@ -1115,7 +1116,7 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, sourcebotService, docsKbService, teamGptAuthService }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantController }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -1240,7 +1241,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
               ask: runtimeAsker.describe(),
               kb: kbService?.describe() ?? { enabled: false },
               sourcebot: sourcebotService?.describe() ?? { enabled: false },
-              docsKb: docsKbService?.describe() ?? { enabled: false }
+              docsKb: docsKbService?.describe() ?? { enabled: false },
+              codeKb: codeKbService?.describe() ?? { enabled: false }
             },
             testing: {
               usingTesterConfig
@@ -1917,6 +1919,121 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         durationMs: Date.now() - startedAt,
       });
     } catch (error) {
+      next(error);
+    }
+  });
+
+  // Friendly mail.read/mail.send/... capability view for the assistant UI.
+  // Derived from the same delegated-scope catalog as /api/assistant/graph/functions.
+  app.get("/api/assistant/capabilities", async (request, response, next) => {
+    try {
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({ ok: false, error: authError.message });
+        return;
+      }
+
+      const grantedScopes = getTokenScopes(token);
+      response.json({ ok: true, capabilities: buildFriendlyCapabilities(grantedScopes) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Current assistant chat model + embedding mode/model/reachability.
+  app.get("/api/assistant/model-status", async (request, response, next) => {
+    try {
+      if (!assistantModelProvider) {
+        response.status(503).json({ ok: false, error: "Assistant model provider is not configured." });
+        return;
+      }
+
+      const chat = await assistantModelProvider.describe();
+      const docs = docsKbService?.describe?.() ?? { enabled: false };
+      const code = codeKbService?.describe?.() ?? { enabled: false };
+      response.json({
+        ok: true,
+        chat,
+        embeddings: {
+          docs: { enabled: docs.enabled, mode: docs.embeddingMode ?? null, model: docs.embeddingModel ?? null },
+          code: { enabled: code.enabled, mode: code.embeddingMode ?? null, model: code.embeddingModel ?? null },
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Text assistant chat — local/cloud model, server-orchestrated tool-calling
+  // loop. Mutations are never executed here; they come back as
+  // proposedActions for the UI to confirm or cancel.
+  app.post("/api/assistant/chat", async (request, response, next) => {
+    try {
+      if (!assistantController) {
+        response.status(503).json({ ok: false, error: "Assistant is not configured." });
+        return;
+      }
+
+      const messages = Array.isArray(request.body?.messages) ? request.body.messages : [];
+      if (!messages.length) {
+        response.status(400).json({ ok: false, error: "messages is required." });
+        return;
+      }
+
+      const result = await assistantController.handleChat({ messages });
+      response.json({ ok: true, ...result });
+    } catch (error) {
+      if (error?.statusCode) {
+        response.status(error.statusCode).json({ ok: false, error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/assistant/actions/:id/confirm", async (request, response, next) => {
+    try {
+      if (!assistantController) {
+        response.status(503).json({ ok: false, error: "Assistant is not configured." });
+        return;
+      }
+
+      const outcome = await assistantController.confirmAction(request.params.id);
+      if (!outcome.ok) {
+        response.status(502).json({ ok: false, error: outcome.error });
+        return;
+      }
+      response.json({ ok: true, result: outcome.result, action: outcome.action });
+    } catch (error) {
+      if (error?.statusCode) {
+        response.status(error.statusCode).json({ ok: false, error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  app.post("/api/assistant/actions/:id/cancel", async (request, response, next) => {
+    try {
+      if (!assistantController) {
+        response.status(503).json({ ok: false, error: "Assistant is not configured." });
+        return;
+      }
+
+      const action = assistantController.cancelAction(request.params.id);
+      response.json({ ok: true, action });
+    } catch (error) {
+      if (error?.statusCode) {
+        response.status(error.statusCode).json({ ok: false, error: error.message });
+        return;
+      }
       next(error);
     }
   });
