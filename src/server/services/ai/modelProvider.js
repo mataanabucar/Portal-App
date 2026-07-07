@@ -39,7 +39,9 @@ export function createModelProvider(config) {
 
   return {
     mode,
+    provider: mode === "local" ? "ollama" : cloud.provider,
     model: activeModel,
+    baseUrl: mode === "local" ? local.baseUrl : null,
 
     async describe() {
       if (mode === "local") {
