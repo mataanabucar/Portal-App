@@ -11,6 +11,7 @@ import {
 import { createPortalService } from "./services/portal/index.js";
 import { createPortalGraphAuth } from "./services/graph/portalGraphAuth.js";
 import { createKbService } from "./services/kb/index.js";
+import { createGennyStudioService } from "./services/gennystudio/index.js";
 import { createSourcebotService } from "./services/sourcebot/index.js";
 import { createDocsKbService } from "./services/docsKb/index.js";
 import { createCodeKbService } from "./services/codeKb/index.js";
@@ -25,6 +26,7 @@ export function startServer(overrides = {}) {
   const graphAuth = createPortalGraphAuth(config);
   const teamGptAuthService = createTeamGptAuthService(config);
   const kbService = createKbService(config, { teamGptAuthService });
+  const gennyStudioService = createGennyStudioService(config, { teamGptAuthService });
   const sourcebotService = createSourcebotService(config);
   const docsKbService = createDocsKbService(config);
   const codeKbService = createCodeKbService(config);
@@ -46,6 +48,7 @@ export function startServer(overrides = {}) {
     graphAuth,
     emailContextSummarizer: createEmailContextSummarizer(config),
     kbService,
+    gennyStudioService,
     sourcebotService,
     docsKbService,
     codeKbService,

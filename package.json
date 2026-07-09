@@ -1,7 +1,7 @@
 {
   "name": "portal-visualizer-local",
   "version": "0.1.0",
-  "description": "Local desktop shell and portal dashboard for Benchmark portal work queue review.",
+  "description": "Browser-based localhost portal dashboard for Benchmark portal work queue review.",
   "author": "Benchmark Gensuite",
   "private": true,
   "type": "module",
@@ -16,7 +16,11 @@
     "graph:capabilities": "node scripts/graph-capability-report.js",
     "bundle:localhost": "node scripts/build-localhost-shareable-bundle.js",
     "open:portal-profile": "node scripts/open-portal-profile.js",
-    "smoke": "node scripts/smoke-test.js"
+    "smoke": "node scripts/smoke-test.js",
+    "rag:health": "node scripts/rag-health-check.js",
+    "rag:index-check": "node scripts/rag-index-check.js",
+    "rag:golden-test": "node scripts/rag-golden-test.js",
+    "rag:ask": "node scripts/rag-ask.js"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

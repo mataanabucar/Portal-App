@@ -9,7 +9,11 @@ const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
 // same `embeddings.create` shape via the OpenAI SDK). The model name is folded
 // into the cache key so switching providers/models invalidates stale vectors
 // instead of silently mixing embedding spaces.
-export async function buildStore(chunks, embeddingClient, cacheFile, embeddingModel = DEFAULT_EMBEDDING_MODEL) {
+//
+// `label` is just a log prefix (e.g. "docsKb", "codeKb", "golden") so
+// concurrent callers' progress output is distinguishable — it has no effect
+// on caching or behavior.
+export async function buildStore(chunks, embeddingClient, cacheFile, embeddingModel = DEFAULT_EMBEDDING_MODEL, { label = "vectorStore" } = {}) {
   const filesHash = computeFilesHash(chunks, embeddingModel);
   const cached = await loadCache(cacheFile);
 
@@ -20,9 +24,17 @@ export async function buildStore(chunks, embeddingClient, cacheFile, embeddingMo
       .filter((c) => c.embedding);
   }
 
+  // No cache hit — every chunk needs a fresh embedding call. This is silent
+  // and can look "stuck" on local Ollama (CPU inference + one-time model
+  // load), so log progress per batch rather than waiting on one big call.
+  console.log(`[${label}] Cache miss — embedding ${chunks.length} chunk(s) with "${embeddingModel}". First run on a local model can take a while (includes one-time model load).`);
+  const startedAt = Date.now();
+
   const texts = chunks.map((c) => `${c.heading}\n\n${c.text}`);
-  const embeddings = await embedBatch(embeddingClient, texts, embeddingModel);
+  const embeddings = await embedBatch(embeddingClient, texts, embeddingModel, label);
   const store = chunks.map((chunk, i) => ({ ...chunk, embedding: embeddings[i] }));
+
+  console.log(`[${label}] Finished embedding ${chunks.length} chunk(s) in ${((Date.now() - startedAt) / 1000).toFixed(1)}s.`);
 
   await saveCache(cacheFile, {
     version: CACHE_VERSION,
@@ -42,15 +54,25 @@ export function search(store, queryEmbedding, topK = 5) {
     .map((entry) => entry.chunk);
 }
 
-async function embedBatch(client, texts, model = DEFAULT_EMBEDDING_MODEL) {
-  const BATCH = 100;
+// Small batch size on purpose: this trades a few extra HTTP round trips for
+// frequent, visible progress. A single 100-item batch against a CPU-bound
+// local Ollama model can take minutes with zero feedback — 10-item batches
+// mean at least a log line every few seconds instead of one silent await.
+async function embedBatch(client, texts, model = DEFAULT_EMBEDDING_MODEL, label = "vectorStore") {
+  const BATCH = 10;
   const results = [];
+  const totalBatches = Math.max(1, Math.ceil(texts.length / BATCH));
+
   for (let i = 0; i < texts.length; i += BATCH) {
+    const batchNumber = Math.floor(i / BATCH) + 1;
+    const batchStartedAt = Date.now();
     const response = await client.embeddings.create({
       model,
       input: texts.slice(i, i + BATCH),
     });
     results.push(...response.data.map((item) => item.embedding));
+    const batchMs = Date.now() - batchStartedAt;
+    console.log(`[${label}] Embedded batch ${batchNumber}/${totalBatches} — ${results.length}/${texts.length} chunk(s) done (${batchMs}ms).`);
   }
   return results;
 }

@@ -1,0 +1,81 @@
+{
+  "info": {
+    "name": "Portal App - Assistant & RAG",
+    "description": "Manual test requests for the assistant chat, docs/code RAG search, item research (Sourcebot/KB/Genny Studio), and /api/ask endpoints. Run `npm run dev` first. Import this file directly into Postman (File > Import).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:3000", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/api/health", "host": ["{{baseUrl}}"], "path": ["api", "health"] }
+      }
+    },
+    {
+      "name": "Assistant model status",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/api/assistant/model-status", "host": ["{{baseUrl}}"], "path": ["api", "assistant", "model-status"] },
+        "description": "Reports chat model (local Ollama or cloud) and docs/code embedding provider status."
+      }
+    },
+    {
+      "name": "Docs search (RAG only, no chat model)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"how does the KB research pipeline work\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/docs/search", "host": ["{{baseUrl}}"], "path": ["api", "docs", "search"] },
+        "description": "Pure retrieval — embeds the query, returns top matching docsKb chunks. No chat model call, no Graph auth needed."
+      }
+    },
+    {
+      "name": "Assistant chat (full bot, needs Graph login)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    { \"role\": \"user\", \"content\": \"What model are you running right now, and can you search the docs for how research pipeline works?\" }\n  ]\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/assistant/chat", "host": ["{{baseUrl}}"], "path": ["api", "assistant", "chat"] },
+        "description": "Full multi-tool assistant (Graph + search_docs + search_code). Requires a cached Graph token at .local-auth/graph-tester-token.json — run `npm run graph-tester` and sign in once first, or this returns 401."
+      }
+    },
+    {
+      "name": "Item research (Sourcebot + KB/Genny Studio)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"why is the audit form not saving\",\n  \"itemContext\": \"Title: Audit form save error\\nApplication: Audit Assistant\",\n  \"messages\": []\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/item/research", "host": ["{{baseUrl}}"], "path": ["api", "item", "research"] },
+        "description": "Runs Sourcebot code search + aris_search (Genny Studio) or KB fallback, returns a structured report plus codeFindings/kbFindings tabs."
+      }
+    },
+    {
+      "name": "Ask (ASK_PROVIDER path)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"prompt\": \"Summarize what this app does in two sentences.\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/ask", "host": ["{{baseUrl}}"], "path": ["api", "ask"] },
+        "description": "Separate from /api/assistant/chat — driven by ASK_PROVIDER (openai | teamgpt | local), not ASSISTANT_MODEL_MODE."
+      }
+    }
+  ]
+}

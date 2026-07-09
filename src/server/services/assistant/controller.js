@@ -214,6 +214,7 @@ async function runDocsSearch(rawArgs, docsKbService) {
   const chunks = await docsKbService.search(query);
   const sources = (Array.isArray(chunks) ? chunks : []).map((chunk) => ({
     type: "app_doc",
+    id: chunk.id,
     title: chunk.docPath,
     path: chunk.docPath,
     heading: chunk.heading,
@@ -252,6 +253,9 @@ function buildAssistantSystemPrompt({ hasDocs, hasCode, runtimeInfo }) {
     "Ground answers about the user's mail, calendar, Teams, tasks, notes, or files in tool results, not assumptions.",
     hasDocs || hasCode
       ? "For questions about how this app itself is built, its architecture, or where a feature lives in the code, use search_docs and/or search_code and cite what you find."
+      : null,
+    hasDocs || hasCode
+      ? 'When you answer from search_docs or search_code results, answer only from what those tools returned: cite the id and path of each source you rely on, say "Insufficient evidence in retrieved documents" and stop guessing if the results do not support an answer, and call out explicitly if two retrieved sources disagree instead of silently picking one.'
       : null,
     "Do not call Microsoft Graph tools just to answer questions about your own runtime, model access, app architecture, or general knowledge.",
     "Be concise and direct.",

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { collectKbResearch } from "../kb/research.js";
+import { collectArisSearchResearch } from "../gennystudio/research.js";
 import { createTeamGptClient } from "../teamgpt/client.js";
 import {
   APPLICATION_DISAMBIGUATION_RULES,
@@ -14,6 +15,7 @@ const MAX_CANDIDATES = 3;
 export async function runResearchPipeline({
   sourcebotService,
   kbService,
+  gennyStudioService,
   docsKbService,
   config,
   itemContext,
@@ -21,6 +23,7 @@ export async function runResearchPipeline({
   messages = [],
   teamGptAuthService,
   kbAuthToken = "",
+  gstudioSessionId = "",
 }) {
   const trail = [];
   const applicationMatch = resolveApplicationContext({
@@ -51,32 +54,25 @@ export async function runResearchPipeline({
         : ""),
   });
 
-  const [sourcebotResearch, kbResearch, docsChunks] = await Promise.all([
+  const [sourcebotResearch, arisSearchResearch, docsChunks] = await Promise.all([
     collectSourcebotResearch({
       sourcebotService,
       intent: normalizedIntent,
       applicationMatch,
     }),
-    collectKbResearch({
-      kbService,
+    collectArisSearchResearch({
+      gennyStudioService,
       itemContext,
-      primarySearchTerm: normalizedIntent.primarySearchTerm,
-      fallbackTerms: normalizedIntent.fallbackTerms,
-      kbAuthToken,
+      userQuery,
+      sessionId: gstudioSessionId,
+      authToken: kbAuthToken,
     }),
     collectDocsResearch(normalizedIntent.primarySearchTerm, docsKbService),
   ]);
 
-  trail.push(...sourcebotResearch.trail, ...kbResearch.trail);
+  trail.push(...sourcebotResearch.trail, ...arisSearchResearch.trail);
 
-  const evidenceBlocks = [
-    ...sourcebotResearch.evidenceBlocks,
-    ...kbResearch.evidenceBlocks,
-  ];
-
-  // Surface the evidence directly so the UI can render distinct tabs.
   const codeFindings = sourcebotResearch.evidenceBlocks.map(toFinding);
-  const kbFindings = kbResearch.evidenceBlocks.map(toFinding);
   const docsFindings = docsChunks.map(toFinding);
   const recommendedSearches = mergeTerms(
     [normalizedIntent.primarySearchTerm],
@@ -88,57 +84,90 @@ export async function runResearchPipeline({
   }
 
   let report;
-  if (evidenceBlocks.length === 0 && docsFindings.length === 0) {
-    report = buildNoEvidenceReport(normalizedIntent, recommendedSearches);
-  } else if (teamGptClient) {
-    const totalBlocks = evidenceBlocks.length + docsFindings.length;
-    try {
-      report = await synthesizeReportWithTeamGpt(teamGptClient, config, {
-        itemContext,
-        userQuery,
-        messages,
-        evidenceBlocks,
-        docsFindings,
-        applicationMatch,
-      });
-      trail.push({
-        tool: "synthesize",
-        summary: `Synthesized ${totalBlocks} evidence block(s) into a structured report with TeamGPT.`,
-      });
-    } catch (error) {
-      console.error("[research-pipeline] TeamGPT synthesis failed:", error.message);
-      report = openai
-        ? await synthesizeReportWithOpenAi(openai, model, {
-            itemContext,
-            userQuery,
-            messages,
-            evidenceBlocks,
-            docsFindings,
-            applicationMatch,
-          }).catch(() => buildFallbackReport(evidenceBlocks, normalizedIntent))
-        : buildFallbackReport(evidenceBlocks, normalizedIntent);
-    }
-  } else if (openai) {
-    const totalBlocks = evidenceBlocks.length + docsFindings.length;
-    try {
-      report = await synthesizeReportWithOpenAi(openai, model, {
-        itemContext,
-        userQuery,
-        messages,
-        evidenceBlocks,
-        docsFindings,
-        applicationMatch,
-      });
-      trail.push({
-        tool: "synthesize",
-        summary: `Synthesized ${totalBlocks} evidence block(s) into a structured report with OpenAI.`,
-      });
-    } catch (error) {
-      console.error("[research-pipeline] OpenAI synthesis failed:", error.message);
+  let kbFindings;
+  let gstudioSessionIdOut = arisSearchResearch.sessionId || "";
+
+  if (arisSearchResearch.text) {
+    // Genny Studio's aris_search agent already returns a final, user-facing
+    // answer — use it directly as the report body. No OpenAI/TeamGPT
+    // synthesis call for this path (that's only for stitching raw evidence
+    // together, which aris_search has already done upstream).
+    report = buildArisSearchReport(arisSearchResearch.text, normalizedIntent);
+    kbFindings = [toFinding(arisSearchResearch.evidenceBlock)];
+    trail.push({
+      tool: "gstudio_report",
+      summary: "Used Genny Studio (aris_search) answer directly as the report; skipped OpenAI/TeamGPT synthesis.",
+    });
+  } else {
+    // Fallback: aris_search was unavailable, unauthorized, or returned
+    // nothing usable. Run the original KB (callKBX.cfm) + synthesis flow.
+    const kbResearch = await collectKbResearch({
+      kbService,
+      itemContext,
+      primarySearchTerm: normalizedIntent.primarySearchTerm,
+      fallbackTerms: normalizedIntent.fallbackTerms,
+      kbAuthToken,
+    });
+    trail.push(...kbResearch.trail);
+
+    const evidenceBlocks = [
+      ...sourcebotResearch.evidenceBlocks,
+      ...kbResearch.evidenceBlocks,
+    ];
+    kbFindings = kbResearch.evidenceBlocks.map(toFinding);
+
+    if (evidenceBlocks.length === 0 && docsFindings.length === 0) {
+      report = buildNoEvidenceReport(normalizedIntent, recommendedSearches);
+    } else if (teamGptClient) {
+      const totalBlocks = evidenceBlocks.length + docsFindings.length;
+      try {
+        report = await synthesizeReportWithTeamGpt(teamGptClient, config, {
+          itemContext,
+          userQuery,
+          messages,
+          evidenceBlocks,
+          docsFindings,
+          applicationMatch,
+        });
+        trail.push({
+          tool: "synthesize",
+          summary: `Synthesized ${totalBlocks} evidence block(s) into a structured report with TeamGPT.`,
+        });
+      } catch (error) {
+        console.error("[research-pipeline] TeamGPT synthesis failed:", error.message);
+        report = openai
+          ? await synthesizeReportWithOpenAi(openai, model, {
+              itemContext,
+              userQuery,
+              messages,
+              evidenceBlocks,
+              docsFindings,
+              applicationMatch,
+            }).catch(() => buildFallbackReport(evidenceBlocks, normalizedIntent))
+          : buildFallbackReport(evidenceBlocks, normalizedIntent);
+      }
+    } else if (openai) {
+      const totalBlocks = evidenceBlocks.length + docsFindings.length;
+      try {
+        report = await synthesizeReportWithOpenAi(openai, model, {
+          itemContext,
+          userQuery,
+          messages,
+          evidenceBlocks,
+          docsFindings,
+          applicationMatch,
+        });
+        trail.push({
+          tool: "synthesize",
+          summary: `Synthesized ${totalBlocks} evidence block(s) into a structured report with OpenAI.`,
+        });
+      } catch (error) {
+        console.error("[research-pipeline] OpenAI synthesis failed:", error.message);
+        report = buildFallbackReport(evidenceBlocks, normalizedIntent);
+      }
+    } else {
       report = buildFallbackReport(evidenceBlocks, normalizedIntent);
     }
-  } else {
-    report = buildFallbackReport(evidenceBlocks, normalizedIntent);
   }
 
   // recommendedSearches is deterministic (from intent), not LLM-authored.
@@ -151,6 +180,7 @@ export async function runResearchPipeline({
     docsFindings,
     retrievalTrail: trail,
     chatUrl: sourcebotResearch.chatUrl || null,
+    gstudioSessionId: gstudioSessionIdOut,
   };
 }
 
@@ -661,6 +691,29 @@ function buildFallbackReport(evidenceBlocks, intent) {
       level: "Low",
       criticalGaps: 1,
       reason: "Report assembled from raw evidence without AI synthesis.",
+    },
+    actionItems: [],
+  };
+}
+
+// Genny Studio's aris_search agent returns a finished answer, not raw
+// evidence, so this just wraps it in the report shape the UI expects —
+// no LLM synthesis call happens for this path.
+function buildArisSearchReport(text, intent) {
+  return {
+    quickTake: {
+      issue: `Investigating "${intent.primarySearchTerm}".`,
+      whatWeKnow: "Answered directly by Genny Studio (aris_search).",
+      nextStep: "Review the answer below. Check the Code Findings tab for related implementation detail if needed.",
+    },
+    summaryOfIssue: text,
+    whatWeFound: [],
+    whatIsMissing: [],
+    recommendedSearches: [],
+    confidence: {
+      level: "Medium",
+      criticalGaps: 0,
+      reason: "Answer returned by Genny Studio's aris_search agent; not independently synthesized against code evidence.",
     },
     actionItems: [],
   };

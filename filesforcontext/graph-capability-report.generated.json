@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-02T01:18:44.107Z",
+  "generatedAt": "2026-07-08T18:24:12.880Z",
   "manifest": {
     "appId": "1fb8c198-909a-412b-9b2e-20450f6e7ecc",
     "displayName": "Mail api"
@@ -10,12 +10,12 @@
     "tokenType": "delegated",
     "appId": "1fb8c198-909a-412b-9b2e-20450f6e7ecc",
     "appDisplayName": "Mail api",
-    "aud": "00000003-0000-0000-c000-000000000000",
+    "aud": "https://graph.microsoft.com",
     "tid": "162035a0-31d1-4b3c-a276-491c1dbea2f1",
     "upn": "700000347@internal.gensuite.com",
     "name": "Abucar, Mataan (Benchmark)",
-    "exp": 1782958934,
-    "expiresAt": "2026-07-02T02:22:14.000Z"
+    "exp": 1783539820,
+    "expiresAt": "2026-07-08T19:43:40.000Z"
   },
   "decodedContextToken": {
     "present": true,

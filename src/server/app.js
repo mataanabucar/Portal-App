@@ -1116,7 +1116,7 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantController }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantController }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -1240,6 +1240,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
               parser: runtimeParser.describe(),
               ask: runtimeAsker.describe(),
               kb: kbService?.describe() ?? { enabled: false },
+              gstudio: gennyStudioService?.describe() ?? { enabled: false },
               sourcebot: sourcebotService?.describe() ?? { enabled: false },
               docsKb: docsKbService?.describe() ?? { enabled: false },
               codeKb: codeKbService?.describe() ?? { enabled: false }
@@ -2045,14 +2046,15 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const canUseKb =
         Boolean(kbStatus.enabled) &&
         Boolean(kbStatus.authConfigured || request.headers.authorization);
+      const canUseGstudio = Boolean(gennyStudioService?.describe?.()?.enabled);
       const canUseDocs = Boolean(docsKbService?.describe?.()?.enabled);
 
-      if (!canUseSourcebot && !canUseKb && !canUseDocs) {
-        response.status(503).json({ ok: false, error: "No research sources are configured (Sourcebot, KB, or Docs)." });
+      if (!canUseSourcebot && !canUseKb && !canUseGstudio && !canUseDocs) {
+        response.status(503).json({ ok: false, error: "No research sources are configured (Genny Studio, Sourcebot, KB, or Docs)." });
         return;
       }
 
-      const { query, messages = [], itemContext = "" } = request.body || {};
+      const { query, messages = [], itemContext = "", gstudioSessionId = "" } = request.body || {};
       if (!query || typeof query !== "string" || !query.trim()) {
         response.status(400).json({ ok: false, error: "query is required." });
         return;
@@ -2061,6 +2063,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       const result = await runResearchPipeline({
         sourcebotService,
         kbService,
+        gennyStudioService,
         docsKbService,
         config,
         itemContext,
@@ -2068,6 +2071,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         messages,
         teamGptAuthService,
         kbAuthToken: request.headers.authorization,
+        gstudioSessionId,
       });
 
       response.json({
@@ -2078,6 +2082,7 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         docsFindings: result.docsFindings,
         chatUrl: result.chatUrl,
         retrievalTrail: result.retrievalTrail,
+        gstudioSessionId: result.gstudioSessionId || "",
       });
     } catch (error) {
       console.error("[/api/item/research]", error);

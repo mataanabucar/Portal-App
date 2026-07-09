@@ -31,7 +31,7 @@ export function createCodeKbService(config) {
         store = [];
         return;
       }
-      store = await buildStore(chunks, embeddingProvider.client, cacheFile, embeddingProvider.model);
+      store = await buildStore(chunks, embeddingProvider.client, cacheFile, embeddingProvider.model, { label: "codeKb" });
       const fileCount = new Set(store.map((c) => c.docPath)).size;
       console.log(`[codeKb] Indexed ${store.length} chunks from ${fileCount} file(s).`);
     } catch (error) {
@@ -50,6 +50,7 @@ export function createCodeKbService(config) {
       });
       return search(store, resp.data[0].embedding, TOP_K).map((chunk) => ({
         type: "code",
+        id: chunk.id,
         title: chunk.docPath,
         path: chunk.docPath,
         startLine: chunk.startLine,

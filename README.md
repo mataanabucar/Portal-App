@@ -1,161 +1,97 @@
-# Portal Visualizer Desktop Shell
+# Portal Visualizer Localhost App
 
-This project is now designed to run primarily as a local Electron desktop shell, not as a browser-tab app.
+Portal Visualizer is a browser-based localhost app for reviewing Benchmark portal work queue data, enriching it with local services, and using optional AI/Graph helpers.
 
-The shell still uses the same backend routes and frontend code internally, but normal use should be through the desktop window:
+The app runs as two local services:
 
-1. Pull portal data from a configurable source.
-2. Normalize it into a predictable snapshot.
-3. Optionally send that snapshot to OpenAI for summarization.
-4. Show the result in a self-contained local app shell.
+- Express backend on `http://127.0.0.1:3000`
+- Next.js frontend on `http://localhost:3011`
 
-## Why this shape
-
-The first goal is not a polished dashboard. The first goal is confidence that a local app can reliably:
-
-- connect to the portal,
-- extract useful data,
-- keep the extraction code isolated from presentation code, and
-- summarize internal details only when explicitly enabled.
-
-That is why the app is backend-first with a thin frontend, wrapped in a desktop shell for day-to-day use.
-
-## Current connector modes
-
-- `mock`: returns sample records so the full pipeline can be tested immediately.
-- `http-json`: fetches JSON from a portal endpoint or internal API.
-- `http-html`: fetches an HTML page and extracts content with CSS selectors.
-- `cookie-html`: runs `http-html` in the background with a saved cookie cache, and only opens a browser window again when those cookies expire and must be refreshed.
-- `browser-html`: opens the portal in a real local browser profile and extracts authenticated content from the rendered page.
-
-For your Benchmark portal use case, `cookie-html` is now the practical default because it keeps normal dashboard refreshes silent and background-only while still giving the app a recovery path when auth expires.
-
-## Quick start
+## Quick Start
 
 ```powershell
 copy .env.example .env
 npm install
-npm start
+npm --prefix frontend install
+npm run dev
 ```
 
-Or double-click:
+`npm run dev` starts the backend in watch mode, starts the frontend dev server, and opens the browser when the backend is ready.
 
-```text
-Launch Portal Visualizer.cmd
-```
-
-Normal use should stay in the Electron window. Opening `http://127.0.0.1:3000` in a browser is now a debugging-only fallback, not the primary workflow.
-
-## Primary mode
-
-The primary supported mode is the Electron shell.
-
-### Why this mode
-
-- no browser-tab workflow in normal use
-- no installer required for the unpacked shell
-- internal app traffic is loopback-only on `127.0.0.1`
-- no inbound LAN exposure for the embedded app server
-- current UI and backend behavior stay intact
-
-### Launch from the working folder
-
-Fastest path for daily local use:
-
-What it does:
-
-- if a current unpacked shell is missing or stale, the launcher rebuilds it automatically
-- if the project root contains `.env`, the launcher mirrors it next to the unpacked shell before startup
-- it then launches the unpacked native shell from `dist\win-unpacked\Portal Visualizer.exe`
-- the desktop app starts the existing local server inside the shell and loads it in the native window
-- writable runtime data stays under the Electron user-data folder
-- the last successful dashboard refresh is persisted under `.local-state/dashboard-cache.json` in that runtime area, so reopening the shell restores the same queue until you click `Refresh queue`
-
-Double-click:
-
-```text
-Launch Portal Visualizer.cmd
-```
-
-Terminal command:
+## Common Commands
 
 ```powershell
-npm start
+npm run dev
+npm run server
+npm run server:dev
+npm run graph-tester
+npm run graph-tester:dev
+npm run graph-tester:client
+npm run graph-tester:client:build
+npm run graph:capabilities
+npm run bundle:localhost
+npm run smoke
 ```
 
-For active local editing in the desktop shell, use:
+- `npm run dev`: starts backend watch mode plus the Next frontend dev server.
+- `npm run server`: starts only the backend.
+- `npm run server:dev`: starts only the backend with `node --watch`.
+- `npm run graph-tester`: starts the standalone Microsoft Graph tester.
+- `npm run graph-tester:dev`: starts the Graph tester with `node --watch`.
+- `npm run graph-tester:client`: starts the separate Graph tester client package.
+- `npm run graph-tester:client:build`: builds the separate Graph tester client.
+- `npm run graph:capabilities`: prints the current Graph capability report.
+- `npm run bundle:localhost`: builds a shareable localhost ZIP.
+- `npm run smoke`: runs the backend smoke scenarios.
 
-```powershell
-npm run dev:desktop
-```
+## Ports
 
-### Portable shell output
+| Service | Default URL | Notes |
+| --- | --- | --- |
+| Backend | `http://127.0.0.1:3000` | Express API and portal connectors |
+| Frontend | `http://localhost:3011` | Next.js app that proxies `/api/*` |
+| Graph Tester | `http://127.0.0.1:3069` | Standalone Microsoft Graph tester |
 
-If you want a self-contained portable folder instead of running from source:
+The frontend proxies API calls through `frontend/src/app/api/[...path]/route.ts`. Set `BACKEND_URL` only when the backend is running somewhere other than `http://127.0.0.1:3000`.
 
-```powershell
-npm run pack:win
-```
-
-This produces:
+## Project Layout
 
 ```text
-dist\win-unpacked\
+frontend/                  Next.js frontend
+public/                    Legacy browser dashboard assets
+scripts/                   Local launchers, smoke tests, bundle builder
+src/server/                Express backend, API routes, services
+src/graph-tester/          Standalone Microsoft Graph tester
+docs/                      Local app and system documentation
+resources/                 Runtime support assets
 ```
 
-That unpacked folder is the most direct portable shell option for local use without an installer.
+## Configuration
 
-### Build Windows executable targets
+The repo root `.env` is the source of truth for local development.
 
-From a terminal:
+Start from:
 
 ```powershell
-npm run dist:win
+copy .env.example .env
 ```
 
-Or by double-clicking:
+### Portal Connector Modes
 
-```text
-Build Portal Visualizer EXE.cmd
-```
+- `mock`: returns sample records so the full pipeline can be tested without a live portal.
+- `http-json`: fetches JSON from a portal endpoint or internal API.
+- `http-html`: fetches an HTML page and extracts content with CSS selectors.
+- `cookie-html`: fetches authenticated HTML using a saved cookie cache and only opens a browser when auth must be refreshed.
+- `browser-html`: opens or attaches to a real local browser profile and extracts authenticated rendered content.
 
-Build output is written to:
-
-```text
-dist\
-```
-
-Two Windows targets are configured:
-
-- `nsis`: standard installer
-- `portable`: portable executable
-
-### Desktop shell `.env` behavior
-
-In development, the Electron shell reads `.env` from the project root.
-
-When packaged, the desktop app looks for `.env` in this order:
-
-1. next to the packaged `.exe`
-2. the Electron user-data directory
-
-That keeps secrets and portal configuration outside the packaged app bundle while still allowing a double-click launch.
-
-## Environment setup
-
-### Basic
-
-Set `PORTAL_SOURCE_MODE=mock` to validate the app without any real portal dependency.
-
-Optional local dashboard persistence path:
+### Basic Validation
 
 ```env
+PORTAL_SOURCE_MODE=mock
 DASHBOARD_CACHE_FILE=.local-state/dashboard-cache.json
 ```
 
-### JSON endpoint mode
-
-Use this when the portal already exposes a JSON endpoint:
+### JSON Endpoint Mode
 
 ```env
 PORTAL_SOURCE_MODE=http-json
@@ -164,9 +100,7 @@ PORTAL_HEADERS_JSON={"Accept":"application/json"}
 PORTAL_DATA_PATH=items
 ```
 
-### HTML page mode
-
-Use this when the portal is server-rendered and you need to scrape visible page content:
+### HTML Page Mode
 
 ```env
 PORTAL_SOURCE_MODE=http-html
@@ -178,9 +112,7 @@ PORTAL_STATUS_SELECTOR=td:nth-child(2)
 PORTAL_DETAIL_SELECTOR=td:nth-child(3)
 ```
 
-### Linked request-table mode
-
-Use this when the landing page is a table of requests and each row links to a detail page:
+### Linked Request Table Mode
 
 ```env
 PORTAL_SOURCE_MODE=http-html
@@ -195,18 +127,7 @@ PORTAL_MAX_DETAIL_PAGES=10
 PORTAL_DETAIL_CONTENT_SELECTOR=body
 ```
 
-This mode matches the live portal structure discovered in Chrome DevTools on May 22, 2026:
-
-- the main page is `index_old.cfm`
-- that landing page may first return an auto-submitting redirect form through `login/internaloredirect.cfm`
-- the active Customer Requests list is inside an iframe whose `src` contains `todolist`
-- each request row includes links such as `?editid=` and `?itemhm=`
-
-The extractor first fetches the outer page, follows that auto-submit redirect form when present, then fetches the request-list iframe, and optionally follows the request links for deeper text.
-
-### Background cookie-backed mode
-
-Use this when you want normal dashboard refreshes to run in the background without opening a separate automation browser each time:
+### Background Cookie Mode
 
 ```env
 PORTAL_SOURCE_MODE=cookie-html
@@ -223,17 +144,9 @@ PLAYWRIGHT_USER_DATA_DIR=C:\Users\700000347\AppData\Local\Google\Chrome Beta\Use
 PLAYWRIGHT_HEADLESS=false
 ```
 
-How it behaves:
+The backend checks the in-memory cookie cache first, then `PORTAL_COOKIE_CACHE_FILE`. If both are missing or expired, it opens a local browser to refresh auth and writes the refreshed cookie snapshot under `.local-auth`.
 
-- the app first checks the in-memory shared cookie cache, then the saved cookie header from `PORTAL_COOKIE_CACHE_FILE`
-- if the cookie cache is still valid, no browser window opens
-- if the cookie cache is missing or expired, the app opens a browser window to refresh auth
-- once that browser session reaches the portal again, the app recaptures cookies, refreshes the shared cache, and returns to background fetches on later refreshes
-- the cookie cache is stored locally under `.local-auth` and is not meant for source control
-
-### Browser-backed authenticated mode
-
-Use this when you want the app to reuse the same authenticated Chrome Beta data you already use:
+### Browser-Backed Authenticated Mode
 
 ```env
 PORTAL_SOURCE_MODE=browser-html
@@ -249,28 +162,9 @@ PLAYWRIGHT_USER_DATA_DIR=C:\Users\700000347\AppData\Local\Google\Chrome Beta\Use
 PLAYWRIGHT_HEADLESS=false
 ```
 
-How it behaves:
+`npm run open:portal-profile` opens the profile path configured in `.env`.
 
-- the app treats your normal Chrome Beta `User Data` folder as the source profile
-- before launch, it mirrors that profile into a local automation-safe copy under `.local-browser`
-- your signed-in Chrome session is reused if that source profile already has portal access
-- Chrome Beta should be fully closed first so the profile mirror is copied from a stable source
-- if Microsoft sign-in appears, complete login in that browser window and retry the portal preview request
-- `npm run open:portal-profile` now opens the same profile path from `.env`
-- successful portal loads also seed the shared cookie cache, so a later `cookie-html` run can resume without reopening the browser
-
-### Shared cookie resume flow
-
-Use this when you want one browser-backed sign-in to feed later background refreshes:
-
-- the running server keeps the latest portal cookie snapshot in a process-global cache
-- the same snapshot is mirrored to `.local-auth/portal-cookie-cache.json`
-- `browser-html` seeds that cache after a successful authenticated portal load
-- `cookie-html` checks the shared cache first, then the on-disk cache, and only opens a browser again if both are missing or expired
-
-### Attach to your existing Chrome Beta session
-
-Use this when you want the app to reuse the browser session you already keep logged in:
+### Attach To Existing Chrome Beta Session
 
 ```env
 PORTAL_SOURCE_MODE=browser-html
@@ -286,34 +180,27 @@ PLAYWRIGHT_DEVTOOLS_ACTIVE_PORT_FILE=C:\Users\700000347\AppData\Local\Google\Chr
 PLAYWRIGHT_HEADLESS=false
 ```
 
-How it behaves:
+This uses the running browser's CDP socket instead of launching another profile. If the browser does not expose a CDP socket, use the mirrored local launch mode above.
 
-- you open Chrome Beta yourself and keep your normal logged-in session
-- the app reads the active CDP port from `DevToolsActivePort`
-- Playwright attaches to that running browser instead of launching its own separate profile
+## AI Providers
 
-This avoids the unsupported path of automating the default Chrome profile directly.
+The app has separate AI paths. Do not assume one setting controls all model traffic.
 
-In practice, if your normal Chrome Beta profile does not expose a live CDP socket, the mirrored local launch above is the reliable option.
+- `/api/ask` uses `ASK_PROVIDER`.
+- `/api/assistant/chat` uses `ASSISTANT_MODEL_MODE`.
+- Parser and summary behavior use their own provider settings in `src/server/config/env.js`.
 
-## Authentication note
+Local assistant defaults:
 
-Your target page currently redirects to Microsoft login when accessed without an authenticated browser session or cookie.
+```env
+ASK_PROVIDER=local
+ASSISTANT_MODEL_MODE=local
+LOCAL_LLM_BASE_URL=http://localhost:11434/v1
+LOCAL_LLM_MODEL=llama3.2:3b
+LOCAL_LLM_API_KEY=ollama
+```
 
-The recommended local backend path is now:
-
-- use `cookie-html` so the app can run silently in the background with a saved cookie cache, and only ask for browser sign-in again when that cache expires.
-
-Fallback options:
-
-- provide `PORTAL_COOKIE` from an authenticated portal session, or
-- use `browser-html` if you want every fetch to come from a live browser session instead of a background cookie cache.
-
-If the app is redirected to Microsoft login, it now returns an explicit auth error instead of silently parsing the sign-in page.
-
-## OpenAI summary
-
-OpenAI summarization is opt-in:
+OpenAI summary is opt-in:
 
 ```env
 OPENAI_ENABLED=true
@@ -322,18 +209,18 @@ OPENAI_MODEL=gpt-5.4-mini
 OPENAI_ALLOW_TESTCHAT=true
 ```
 
-The app sends `store: false` on OpenAI requests so portal data is not stored by default.
+OpenAI requests use `store: false` where supported.
 
-## Portal parser
+## Portal Parser
 
-The local app now also exposes `POST /api/portal/parse`.
+The backend exposes `POST /api/portal/parse`.
 
-This uses the live portal snapshot as model input and supports two modes:
+This uses the live portal snapshot as model input and supports:
 
 - structured mode: sends the portal snapshot through a JSON-schema parser and returns normalized request items
-- `testchat` mode: bypasses the parser schema and returns raw assistant text so you can inspect how the model is reading the portal data
+- `testchat` mode: bypasses the parser schema and returns raw assistant text
 
-Example request:
+Example:
 
 ```json
 {
@@ -342,39 +229,11 @@ Example request:
 }
 ```
 
-Example response shape:
+## Microsoft Graph Tester
 
-```json
-{
-  "snapshot": {
-    "recordCount": 2
-  },
-  "parser": {
-    "mode": "testchat",
-    "responseText": "..."
-  }
-}
-```
+The standalone Graph tester is used for Microsoft 365 auth and API testing. It reuses the Graph service layer under `src/server/services/graph/`.
 
-The browser prototype exposes this through the `Run portal parser` button and the `Use parser test chat mode` checkbox.
-
-## Standalone Graph Tester
-
-The repo now also includes a separate browser-launched Microsoft Graph tester.
-
-This is intentionally isolated from the main portal server, Electron shell, and `public/` dashboard UI. It reuses only the Graph service layer under `src/server/services/graph/`.
-
-### What it is for
-
-- manual testing of the current Graph service functions
-- inspecting Graph responses in a readable UI
-- trying OData filters and query options without exposing secrets to the browser
-- resolving people, chats, and mailbox items by human-friendly names such as person names, chat topics, participant names, and message subjects
-- safely gating mutations behind an explicit confirmation checkbox
-
-### Required environment values
-
-Set the normal Graph app registration values:
+Required Graph app values:
 
 ```env
 GRAPH_TENANT_ID=
@@ -383,18 +242,7 @@ GRAPH_CLIENT_SECRET=
 GRAPH_SCOPES=User.Read Mail.Read Calendars.Read Chat.Read People.Read MailboxSettings.ReadWrite offline_access
 ```
 
-Use `GRAPH_CLIENT_SECRET` as a Windows user environment variable so every launcher and script can reuse the same secret:
-
-```powershell
-[Environment]::SetEnvironmentVariable("GRAPH_CLIENT_SECRET", "<secret>", "User")
-$env:GRAPH_CLIENT_SECRET
-```
-
-Leave `GRAPH_CLIENT_SECRET=` blank in `.env` when you use the global variable.
-
-Keep `GRAPH_REDIRECT_URI` for the existing CLI script flow in `scripts/test-graph-api.js`.
-
-The standalone tester uses separate host and port settings plus a persisted token cache:
+Optional tester settings:
 
 ```env
 GRAPH_TESTER_HOST=127.0.0.1
@@ -404,35 +252,12 @@ GRAPH_TESTER_TOKEN_CACHE_FILE=.local-auth/graph-tester-token.json
 GRAPH_TESTER_AUTO_LOGIN_ON_STARTUP=true
 ```
 
-- if `GRAPH_TESTER_REDIRECT_URI` is blank, the tester uses `http://localhost:3069/auth/redirect` based on its own port
-- the standalone tester no longer falls back to `GRAPH_REDIRECT_URI`; that redirect can belong to a different script or app
-- `GRAPH_TESTER_TOKEN_CACHE_FILE` stores the server-side token set locally so the tester can survive restarts
-- `GRAPH_TESTER_AUTO_LOGIN_ON_STARTUP=true` makes the tester automatically open Microsoft login at startup when no valid cached token is available
-- `scripts/manual-graph-oauth.ps1` now reads `GRAPH_CLIENT_SECRET` from the saved Windows environment variable and fails fast if that variable is missing
+If `GRAPH_TESTER_REDIRECT_URI` is blank, the tester uses `http://localhost:3069/auth/redirect`.
 
-### Azure redirect registration
-
-Register the redirect URI that the tester will actually use in the Azure app registration.
-
-Examples:
-
-```text
-http://localhost:3069/auth/redirect
-http://127.0.0.1:3069/auth/redirect
-```
-
-### Start the tester
-
-Normal launch:
+Start it with:
 
 ```powershell
 npm run graph-tester
-```
-
-Watch mode:
-
-```powershell
-npm run graph-tester:dev
 ```
 
 Then open:
@@ -441,74 +266,48 @@ Then open:
 http://127.0.0.1:3069
 ```
 
-### Auth and security notes
+Auth notes:
 
-- on startup, the tester loads the cached token set from `GRAPH_TESTER_TOKEN_CACHE_FILE`
-- if the access token is expired and a refresh token is present, the tester silently refreshes and rewrites the cache file
-- if no valid token can be reused, the tester automatically opens the Microsoft login flow at startup when `GRAPH_TESTER_AUTO_LOGIN_ON_STARTUP=true`
-- the login button can be used later to force a fresh interactive OAuth flow
-- tokens, refresh tokens, id tokens, and `GRAPH_CLIENT_SECRET` stay server-side only
-- the persisted token cache file is local-only and already covered by `.gitignore` through `.local-auth/`
-- the UI only receives safe token metadata such as auth state, scope list, and expiry
-- mutating functions require the confirmation checkbox before the request can run
-- `Mail.Send` is still not implemented or exposed through the tester
+- The tester stores tokens under `.local-auth/graph-tester-token.json`.
+- Token secrets stay server-side.
+- The UI receives safe token metadata only.
+- If `GRAPH_SCOPES` changes, delete `.local-auth/graph-tester-token.json` and sign in again.
+- Mutating Graph functions require explicit confirmation in the tester UI.
 
-## Development and debugging
+## Localhost Shareable Bundle
 
-Normal use should stay in Electron.
-
-Use these only when you intentionally need development or debugging behavior:
+Build a ZIP that runs the app on localhost with Node.js:
 
 ```powershell
-npm run dev
-npm run dev:desktop
-npm run server
-npm run server:dev
+npm run bundle:localhost
 ```
 
-- `npm run dev`: starts the local server in watch mode and opens `http://127.0.0.1:3000` in your default browser for debugging
-- `npm run dev:desktop`: rebuilds the unpacked Electron shell from current source and launches it
-- `npm run server`: runs only the local API/static server
-- `npm run server:dev`: runs the server in watch mode for backend-only debugging
-
-If you run a server-only script, the browser fallback URL is:
+Output:
 
 ```text
-http://127.0.0.1:3000
+dist\localhost-shareable\Portal Visualizer Localhost Standalone.zip
 ```
 
-## Scripts
+The bundle includes the backend runtime, built frontend output, production dependencies, Graph tester runtime, launchers, and the root `.env`.
+
+## Validation
+
+Use these checks before handing off changes:
 
 ```powershell
-npm run dev
-npm run dev:desktop
-npm run start
-npm run desktop
-npm run server
-npm run server:dev
-npm run graph-tester
-npm run graph-tester:dev
-npm run pack:win
-npm run dist:win
-npm run bundle:localhost
+node --check scripts/build-localhost-shareable-bundle.js
+npm --prefix frontend run lint
 npm run smoke
 ```
 
-`npm run smoke` now validates mock mode, raw HTML mode, iframe mode, cookie-backed mode, and browser-backed mode when a local Chrome-family browser is available.
+For a live run:
 
-`npm run bundle:localhost` creates a smaller browser-based shareable ZIP under `dist/localhost-shareable/` that runs the app on localhost with Node.js instead of Electron.
-
-## File layout
-
-```text
-public/                  Dashboard frontend loaded inside the Electron shell
-scripts/                 Smoke test
-src/server/config/       Env parsing
-src/server/routes/       HTTP endpoints
-src/server/services/ai/  Summary providers
-src/server/services/portal/ Portal data providers
+```powershell
+npm run dev
 ```
 
-## Next step after this prototype
+Open:
 
-Once you know the real portal page or endpoint you want, the next step is to replace the generic connector config with a portal-specific extractor and then build the actual dashboard UI on top of the normalized snapshot shape.
+```text
+http://localhost:3011
+```

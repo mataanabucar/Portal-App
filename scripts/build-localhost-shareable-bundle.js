@@ -76,7 +76,7 @@ function installProductionDependencies() {
 }
 
 function stageLauncher() {
-  const launcherPath = path.join(bundleRoot, "Launch Portal Visualizer Localhost.cmd");
+  const launcherPath = path.join(bundleRoot, "Start Portal Visualizer Localhost.cmd");
   const launcherContents = [
     "@echo off",
     "setlocal",
@@ -135,14 +135,14 @@ function stageReadme() {
     "Portal Visualizer Localhost Bundle",
     "",
     "What this is",
-    "- A smaller browser-based distribution that runs the app on localhost instead of Electron.",
+    "- A browser-based distribution that runs the app on localhost with Node.js.",
     "",
     "Requirements",
     "- Node.js 20 or newer must already be installed on this machine.",
     "",
     "How to use",
     "1. Unzip this folder somewhere local.",
-    "2. Double-click Launch Portal Visualizer Localhost.cmd.",
+    "2. Double-click Start Portal Visualizer Localhost.cmd.",
     "3. Wait for the launcher to start the backend and frontend.",
     "4. The browser will open automatically when the app is ready.",
     "5. Sign in to Microsoft / Portal when prompted.",
@@ -165,7 +165,7 @@ function stageReadme() {
     "- .env at the bundle root",
     "",
     "Notes",
-    "- This bundle is smaller than Electron because it does not include Chromium.",
+    "- This bundle expects the user's installed browser to open the local app URL.",
     "- Do not copy another user's .local-auth, .local-browser, or .local-state folders into this bundle.",
     "- Local auth and cache files will be created on the target machine as the app runs.",
     ""

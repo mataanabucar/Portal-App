@@ -2,15 +2,22 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 const CSV_ROWS_PER_CHUNK = 30;
+const TXT_CHUNK_MAX_CHARS = 1500;
 
 const DOCUMENT_LOADERS = {
   ".md": chunkMarkdownByHeadings,
   ".csv": chunkCsvByRows,
+  ".txt": chunkPlainTextByParagraphs,
 };
 
 export async function loadDocChunks(docsDir) {
   const docFiles = await findSupportedDocFiles(docsDir);
   const chunks = [];
+  // One ingest timestamp per loadDocChunks() call — records when this
+  // ingestion pass ran, distinct from `mtime` (when the source file itself
+  // last changed, i.e. its version). Re-embedding still only happens when
+  // buildStore's cache key (model + docPath/mtime pairs) actually changes.
+  const ingestTime = new Date().toISOString();
 
   for (const filePath of docFiles) {
     const relPath = relative(docsDir, filePath).replace(/\\/g, "/");
@@ -19,7 +26,12 @@ export async function loadDocChunks(docsDir) {
       stat(filePath),
     ]);
     const loader = DOCUMENT_LOADERS[extname(filePath).toLowerCase()];
-    if (loader) chunks.push(...loader(content, relPath, fileStat.mtimeMs));
+    if (!loader) continue;
+
+    const rawChunks = loader(content, relPath, fileStat.mtimeMs);
+    for (const chunk of rawChunks) {
+      chunks.push({ ...chunk, filename: basename(relPath), ingestTime });
+    }
   }
 
   return chunks;
@@ -111,6 +123,66 @@ function chunkCsvByRows(content, docPath, mtime) {
   return chunks;
 }
 
+// Chunks on paragraph boundaries (blank-line separated) first, packing
+// consecutive paragraphs together up to TXT_CHUNK_MAX_CHARS. A single
+// paragraph larger than the limit is hard-sliced as a last resort so no
+// chunk ever exceeds the cap, while normal paragraphs stay intact.
+function chunkPlainTextByParagraphs(content, docPath, mtime) {
+  const paragraphs = content
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const chunks = [];
+  let buffer = [];
+  let bufferLen = 0;
+  let partIndex = 1;
+
+  const flush = () => {
+    if (buffer.length === 0) return;
+    const text = buffer.join("\n\n").trim();
+    buffer = [];
+    bufferLen = 0;
+    if (text.length < 50) return;
+    chunks.push({
+      id: `${docPath}#part-${partIndex}`,
+      docPath,
+      heading: `${fileTitle(docPath)} (part ${partIndex})`,
+      text,
+      mtime,
+    });
+    partIndex += 1;
+  };
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.length > TXT_CHUNK_MAX_CHARS) {
+      flush();
+      for (let i = 0; i < paragraph.length; i += TXT_CHUNK_MAX_CHARS) {
+        const slice = paragraph.slice(i, i + TXT_CHUNK_MAX_CHARS).trim();
+        if (slice.length < 50) continue;
+        chunks.push({
+          id: `${docPath}#part-${partIndex}`,
+          docPath,
+          heading: `${fileTitle(docPath)} (part ${partIndex})`,
+          text: slice,
+          mtime,
+        });
+        partIndex += 1;
+      }
+      continue;
+    }
+
+    if (buffer.length > 0 && bufferLen + paragraph.length > TXT_CHUNK_MAX_CHARS) {
+      flush();
+    }
+    buffer.push(paragraph);
+    bufferLen += paragraph.length + 2;
+  }
+  flush();
+
+  return chunks;
+}
+
 function formatCsvRow(headers, row, rowNumber) {
   const fields = headers
     .map((header, index) => {
@@ -172,4 +244,8 @@ function slugify(text) {
 
 function fileTitle(docPath) {
   return docPath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? docPath;
+}
+
+function basename(docPath) {
+  return docPath.split("/").pop() ?? docPath;
 }

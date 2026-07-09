@@ -131,6 +131,18 @@ export function buildConfig(overrides = {}) {
       10
     ),
 
+    // Genny Studio (gstudio agent invoke) — aris_search research source.
+    // Reuses teamGptAuthService's cached JWT (same genai-proxy-na host as
+    // TEAMGPT_ENDPOINT_URL/KB_AUTH_TOKEN); no separate token minting here.
+    gennyStudioBaseUrl:
+      process.env.GENNYSTUDIO_BASE_URL ||
+      "https://genai-proxy-na.benchmarkdigital.com",
+    gennyStudioAgentRef: process.env.GENNYSTUDIO_AGENT_REF || "aris_search",
+    gennyStudioRequestTimeoutMs: Number.parseInt(
+      process.env.GENNYSTUDIO_REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "20000",
+      10
+    ),
+
     // Microsoft Graph / Azure AD
     graphTenantId:      process.env.GRAPH_TENANT_ID      || "",
     graphClientId:      process.env.GRAPH_CLIENT_ID      || "",
@@ -174,7 +186,12 @@ export function buildConfig(overrides = {}) {
     localEmbeddingApiKey: process.env.LOCAL_EMBEDDING_API_KEY || "ollama",
     cloudEmbeddingProvider: process.env.CLOUD_EMBEDDING_PROVIDER || "openai",
     cloudEmbeddingApiKey: process.env.CLOUD_EMBEDDING_API_KEY || "",
-    cloudEmbeddingModel: process.env.CLOUD_EMBEDDING_MODEL || "text-embedding-3-small"
+    cloudEmbeddingModel: process.env.CLOUD_EMBEDDING_MODEL || "text-embedding-3-small",
+
+    // Optional override for where docsKb reads project documents from.
+    // Empty string keeps the existing default (repo's docs/ folder).
+    // Accepts an absolute path or one relative to the repo root.
+    docsKbPath: process.env.DOCS_KB_PATH || ""
   };
 
   return { ...baseConfig, ...overrides };

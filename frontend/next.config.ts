@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 // NOTE: API proxying is handled at runtime by src/app/api/[...path]/route.ts,
 // not by a rewrite here. Rewrite destinations are baked into the build manifest
-// at build time and cannot honor the desktop shell's dynamic BACKEND_URL.
+// at build time and cannot honor a runtime BACKEND_URL.
 
 const nextConfig: NextConfig = {
   output: "standalone",

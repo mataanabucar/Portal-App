@@ -1,11 +1,22 @@
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { loadDocChunks } from "./loader.js";
 import { buildStore, search } from "./vectorStore.js";
 import { createEmbeddingProvider } from "../ai/embeddingProvider.js";
 
-const DOCS_DIR = fileURLToPath(new URL("../../../../docs/", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
+const DEFAULT_DOCS_DIR = join(REPO_ROOT, "docs/");
 const LOCAL_STATE_DIR = fileURLToPath(new URL("../../../../.local-state/", import.meta.url));
+
+// DOCS_KB_PATH lets docsKb index a different folder than the repo's docs/
+// default — absolute, or relative to the repo root. Empty/unset preserves
+// today's behavior exactly.
+function resolveDocsDir(config) {
+  const override = typeof config?.docsKbPath === "string" ? config.docsKbPath.trim() : "";
+  if (!override) return DEFAULT_DOCS_DIR;
+  const resolved = isAbsolute(override) ? override : join(REPO_ROOT, override);
+  return resolved.endsWith("/") ? resolved : `${resolved}/`;
+}
 // The legacy cache path is a git-TRACKED file committed with vectors from this
 // exact cloud model. Any other embedding model must cache elsewhere, or every
 // mode switch silently overwrites the committed cache and re-embeds all docs
@@ -15,6 +26,8 @@ const TOP_K = 5;
 
 export function createDocsKbService(config) {
   const embeddingProvider = createEmbeddingProvider(config);
+  const docsDir = resolveDocsDir(config);
+  const usingDefaultDocsDir = docsDir === DEFAULT_DOCS_DIR;
 
   if (!embeddingProvider.enabled) {
     return {
@@ -24,21 +37,24 @@ export function createDocsKbService(config) {
     };
   }
 
+  // The committed git-tracked cache is specific to the default docs/ folder
+  // at the default cloud model — a custom DOCS_KB_PATH always caches locally
+  // instead, same as any non-default embedding model.
   const cacheFile =
-    embeddingProvider.mode === "cloud" && embeddingProvider.model === COMMITTED_CACHE_MODEL
-      ? join(DOCS_DIR, ".embeddings-cache.json")
+    usingDefaultDocsDir && embeddingProvider.mode === "cloud" && embeddingProvider.model === COMMITTED_CACHE_MODEL
+      ? join(docsDir, ".embeddings-cache.json")
       : join(LOCAL_STATE_DIR, `docs-embeddings-cache.${slugifyModel(embeddingProvider.model)}.json`);
   let store = null;
 
   async function ensureStore() {
     if (store !== null) return;
     try {
-      const chunks = await loadDocChunks(DOCS_DIR);
+      const chunks = await loadDocChunks(docsDir);
       if (chunks.length === 0) {
         store = [];
         return;
       }
-      store = await buildStore(chunks, embeddingProvider.client, cacheFile, embeddingProvider.model);
+      store = await buildStore(chunks, embeddingProvider.client, cacheFile, embeddingProvider.model, { label: "docsKb" });
       const docCount = new Set(store.map((c) => c.docPath)).size;
       console.log(`[docsKb] Indexed ${store.length} chunks from ${docCount} doc(s).`);
     } catch (error) {
@@ -66,7 +82,7 @@ export function createDocsKbService(config) {
     describe() {
       return {
         enabled: true,
-        docsDir: DOCS_DIR,
+        docsDir,
         docCount: store ? new Set(store.map((c) => c.docPath)).size : null,
         chunkCount: store?.length ?? null,
         embeddingMode: embeddingProvider.mode,

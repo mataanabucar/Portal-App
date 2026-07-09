@@ -2,9 +2,9 @@
 //
 // We deliberately do NOT use next.config rewrites for this: rewrite
 // destinations are baked into the build manifest at `next build` time, so a
-// runtime BACKEND_URL (the embedded Express server uses a dynamic port) cannot
-// be honored. A Route Handler runs on every request and reads process.env
-// fresh, so it works with whatever port the desktop shell assigns.
+// runtime BACKEND_URL cannot be honored. A Route Handler runs on every request
+// and reads process.env fresh, so it works with whichever backend URL the
+// launcher or environment provides.
 
 export const dynamic = "force-dynamic";
 

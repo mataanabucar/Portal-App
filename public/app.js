@@ -1859,7 +1859,7 @@ async function readDashboardCache() {
     try {
       writeDashboardCacheToLocalStorage(serverCachedValue);
     } catch {
-      // Disk-backed cache is the primary restore path for the desktop shell.
+      // Disk-backed cache is the primary restore path across browser sessions.
     }
 
     return serverCachedValue;
@@ -1884,7 +1884,7 @@ async function saveDashboardCache(payload, healthPayload) {
       body: JSON.stringify(cacheRecord)
     });
   } catch (error) {
-    saveErrors.push(`desktop cache save failed: ${error.message}`);
+    saveErrors.push(`dashboard cache save failed: ${error.message}`);
   }
 
   return {
