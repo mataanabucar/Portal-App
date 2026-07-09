@@ -25,6 +25,7 @@ import {
   Square,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { MermaidDiagram } from "@/components/MermaidDiagram";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
@@ -906,11 +907,18 @@ function FindingsList({
           {finding.location && finding.location !== finding.label && (
             <p className="text-xs font-mono text-slate-500 mb-2 truncate">{finding.location}</p>
           )}
-          {finding.snippets && (
-            <pre className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 overflow-x-auto text-xs text-emerald-300 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-72">
-              {finding.snippets}
-            </pre>
-          )}
+          {finding.snippets &&
+            (finding.language === "Genny Studio" ? (
+              // aris_search returns a finished markdown answer — render it as
+              // formatted prose, not a monospace code block.
+              <div className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 overflow-y-auto max-h-96">
+                <MarkdownBody content={finding.snippets} />
+              </div>
+            ) : (
+              <pre className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 overflow-x-auto text-xs text-emerald-300 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-72">
+                {finding.snippets}
+              </pre>
+            ))}
         </div>
       ))}
       {trail && trail.length > 0 && <RetrievalTrail steps={trail} />}
@@ -1002,6 +1010,9 @@ function MarkdownBody({ content }: { content: string }) {
           </a>
         ),
         code: ({ className, children }) => {
+          if (className === "language-mermaid") {
+            return <MermaidDiagram code={String(children)} />;
+          }
           const isBlock = className?.startsWith("language-");
           if (isBlock) {
             return (
@@ -1014,11 +1025,23 @@ function MarkdownBody({ content }: { content: string }) {
             <code className="text-xs font-mono text-emerald-300 bg-slate-900/60 rounded px-1 py-0.5">{children}</code>
           );
         },
-        pre: ({ children }) => (
-          <pre className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 my-2 overflow-x-auto text-xs">
-            {children}
-          </pre>
-        ),
+        pre: ({ children }) => {
+          // Mermaid blocks render as a diagram div — don't wrap them in <pre>.
+          const child = Array.isArray(children) ? children[0] : children;
+          if (
+            child &&
+            typeof child === "object" &&
+            "props" in child &&
+            (child.props as { className?: string }).className === "language-mermaid"
+          ) {
+            return <>{children}</>;
+          }
+          return (
+            <pre className="bg-slate-950/70 border border-slate-800/60 rounded-lg p-3 my-2 overflow-x-auto text-xs">
+              {children}
+            </pre>
+          );
+        },
       }}
     >
       {content}

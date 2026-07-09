@@ -19,12 +19,15 @@ import {
   type AssistantModelStatusResponse,
   type AssistantProposedAction,
   type AssistantSource,
+  type ResponseBlock,
 } from "@/lib/assistantChat";
+import { ResponseBlocks } from "@/components/assistant/ResponseBlocks";
 
 interface ChatEntry {
   id: string;
   role: "user" | "assistant";
   content: string;
+  blocks?: ResponseBlock[];
   sources?: AssistantSource[];
   proposedActions?: AssistantProposedAction[];
   error?: boolean;
@@ -93,6 +96,7 @@ export function AssistantChatPanel() {
           id: makeId(),
           role: "assistant",
           content: res.content || "(no response)",
+          blocks: res.blocks,
           sources: res.sources,
           proposedActions: res.proposedActions,
         },
@@ -238,7 +242,11 @@ function ChatBubble({
       <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
         {entry.role === "assistant" ? "Assistant" : "You"}
       </p>
-      <p className="whitespace-pre-wrap">{entry.content}</p>
+      {entry.blocks && entry.blocks.length > 0 ? (
+        <ResponseBlocks blocks={entry.blocks} />
+      ) : (
+        <p className="whitespace-pre-wrap">{entry.content}</p>
+      )}
 
       {entry.sources && entry.sources.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -371,11 +379,19 @@ function StatusRow({
 }) {
   const chat = modelStatus?.chat;
   const modelLabel = chat
-    ? chat.mode === "local"
-      ? `Local · ${chat.model}${chat.reachable === false ? " (unreachable)" : ""}`
-      : `Cloud · ${chat.provider} · ${chat.model}`
+    ? chat.mode === "orchestrator"
+      ? "Orchestrator · deterministic router"
+      : chat.mode === "local"
+        ? `Local · ${chat.model}${chat.reachable === false ? " (unreachable)" : ""}`
+        : `Cloud · ${chat.provider} · ${chat.model}`
     : "Model status unavailable";
-  const modelOk = chat ? (chat.mode === "local" ? chat.reachable !== false : chat.enabled) : false;
+  const modelOk = chat
+    ? chat.mode === "orchestrator"
+      ? true
+      : chat.mode === "local"
+        ? chat.reachable !== false
+        : chat.enabled
+    : false;
 
   return (
     <div className="space-y-2">

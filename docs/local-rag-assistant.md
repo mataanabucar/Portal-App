@@ -1,5 +1,13 @@
 # Local Ollama + RAG Assistant
 
+> **LEGACY — archived 2026-07.** The default assistant path is now the
+> deterministic orchestrator (`src/server/services/orchestrator/`), which
+> routes questions to GennyStudio/KB, TeamGPT, Sourcebot, Microsoft Graph, or
+> the research pipeline without any local model. Everything below only applies
+> when `LEGACY_LOCAL_RAG_ENABLED=true` is set in `.env` (plus
+> `ASSISTANT_MODEL_MODE=local` and/or `ASSISTANT_EMBEDDING_MODE=local|cloud`).
+> The `rag:*` npm scripts referenced in this doc are now named `legacy:rag:*`.
+
 This app can run its assistant chat and document/code search entirely offline
 against a local [Ollama](https://ollama.com) install. This doc explains how
 the pieces fit together and how to operate them.

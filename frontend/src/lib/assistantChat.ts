@@ -9,7 +9,7 @@ export interface AssistantChatMessage {
 }
 
 export interface AssistantSource {
-  type: "app_doc" | "code";
+  type: "app_doc" | "code" | "kb" | "gstudio" | "graph" | "teamgpt" | "research";
   title: string;
   path: string;
   heading?: string;
@@ -17,6 +17,67 @@ export interface AssistantSource {
   endLine?: number;
   snippet: string;
 }
+
+// Structured response blocks emitted by the deterministic orchestrator
+// (src/server/services/orchestrator/responseBlocks.js). Rendered by
+// components/assistant/ResponseBlocks.tsx.
+export interface TextBlock {
+  type: "text";
+  text: string;
+}
+
+export interface SummaryBlock {
+  type: "summary";
+  title: string;
+  text: string;
+}
+
+export interface TableBlockData {
+  type: "table";
+  title?: string;
+  columns: string[];
+  rows: string[][];
+}
+
+export interface ActionItemData {
+  title: string;
+  owner?: string;
+  dueDate?: string;
+  priority?: string;
+  status?: string;
+  sourceText?: string;
+}
+
+export interface ActionsBlock {
+  type: "actions";
+  items: ActionItemData[];
+}
+
+export interface SourcesBlock {
+  type: "sources";
+  sources: AssistantSource[];
+}
+
+export interface ImageBlock {
+  type: "image";
+  url: string;
+  alt?: string;
+}
+
+export interface ChartBlock {
+  type: "chart";
+  title: string;
+  table?: TableBlockData;
+}
+
+export type ResponseBlock =
+  | TextBlock
+  | SummaryBlock
+  | TableBlockData
+  | ActionsBlock
+  | SourcesBlock
+  | ImageBlock
+  | ChartBlock;
 
 export interface AssistantProposedAction {
   id: string;
@@ -36,11 +97,15 @@ export interface AssistantToolTraceEntry {
 export interface AssistantChatResponse {
   ok: boolean;
   content: string;
+  answer?: string;
+  blocks?: ResponseBlock[];
   sources: AssistantSource[];
   proposedActions: AssistantProposedAction[];
   toolTrace: AssistantToolTraceEntry[];
+  provider?: string;
+  route?: string;
   model: string;
-  modelMode: "local" | "cloud";
+  modelMode: "local" | "cloud" | "orchestrator";
   error?: string;
 }
 
@@ -59,7 +124,7 @@ export interface AssistantCapabilitiesResponse {
 }
 
 export interface AssistantProviderStatus {
-  mode: "local" | "cloud";
+  mode: "local" | "cloud" | "orchestrator";
   provider: string;
   model: string;
   baseUrl?: string;

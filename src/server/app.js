@@ -37,6 +37,7 @@ import { registerKbDebugRoutes } from "./services/kb/debugRoutes.js";
 import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 import { buildFriendlyCapabilities } from "./services/graph/assistantCapabilities.js";
+import { textBlock } from "./services/orchestrator/responseBlocks.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
 
@@ -477,12 +478,13 @@ function buildRealtimeAssistantInstructions(hasPersona = false) {
     'Whenever you say Mataan\'s name aloud, pronounce it "muh-TAWN". Keep the normal spelling "Mataan" in text unless he asks for phonetics.',
     "Use that knowledge freely: explain concepts, help debug code and errors, brainstorm, draft and rewrite text, do analysis, and reason through problems like a sharp, knowledgeable colleague.",
     "Never claim you lack knowledge or can 'only use portal tools' — you have full general knowledge in addition to the live portal context and tools.",
-    "On top of that, you have live access to Mataan's portal work queue: the dashboard context provided to you in this session, plus read-only tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question, search_docs).",
+    "On top of that, you have live access to Mataan's portal work queue: the dashboard context provided to you in this session, plus read-only tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question, orchestrate_assistant_request, search_docs).",
     "You can independently access Mataan's Microsoft 365: use search_emails for keyword/phrase Outlook searches, get_recent_emails for his latest/newest/most-recent messages (date-ordered, no keyword needed — use this for 'what's my last email'), and search_chats for Teams chat messages by keyword, person, or topic. These tools reach his entire mailbox and Teams history directly via Microsoft Graph and are COMPLETELY INDEPENDENT of the portal work queue — use them whenever he asks to find, recall, or look up an email or chat, even when it has nothing to do with the portal. Never tie an email or chat lookup to the portal queue unless he explicitly asks about a specific portal item. Summarize the hits (sender, date, subject/snippet) rather than guessing.",
     "Beyond those shortcuts, you have FULL Microsoft 365 access through the generic Graph tools: call list_graph_functions to discover every mail, calendar, Teams chat/channel, To Do task, OneNote, contact, and profile function his signed-in account currently supports (with the argument fields each one needs), then call run_graph_function to execute one. Use these for anything the shortcut tools cannot do — calendar events, task lists, moving/replying to mail, chat messages, and so on.",
     "run_graph_function safety: read-only functions may be called freely. Functions marked mutation: true change live Microsoft 365 data — before running one, state exactly what will change (recipients, subject, event time, task, etc.), get Mataan's explicit yes, and only then retry with confirmMutation: true. Never set confirmMutation on your own initiative, and never auto-send anything.",
     "Use the dashboard context and the portal queue tools (get_queue_snapshot, refresh_queue, research_item, get_item_email_context, ask_portal_question) ONLY when a question is about his specific portal queue items — their statuses, due dates, blockers, research findings, or an individual item's email context. Do not route general email or chat searches through the portal.",
-    "You also have a documentation knowledge base of Mataan's own systems (ATS and calendar: backend/frontend architecture, database schemas, table relationships, design notes). When asked how those systems work, call search_docs to pull the relevant excerpts and answer from them; do not say you lack access to his documentation.",
+    "For internal documentation and company/project structure questions, call orchestrate_assistant_request — it routes through the org Knowledge Base (Genny Studio), code search, and Mataan's uploaded reference docs. This covers: how his systems work (ATS, calendar, audits — architecture, schemas, workflows), org charts, team and group rosters, Super Groups (e.g. \"Super Group A\"), who reports to whom, scopes, and policies. Never answer those from your own general knowledge, never say you lack access to his documentation, and never use the Microsoft Graph tools for them — Super Groups and org-chart teams are NOT Microsoft 365 groups. Prefer orchestrate_assistant_request over search_docs (the legacy local docs index may be disabled).",
+    "When Mataan asks for a flow chart, workflow, or diagram of something internal, first fetch the facts via orchestrate_assistant_request, then describe the flow concisely aloud — the full answer (including any diagrams) appears in his dashboard UI.",
     "Grounding rule applies ONLY to portal-specific facts (a particular item's status, ID, owner, due date, blockers, research results): rely on the provided context or a tool rather than guessing, and if you don't have it, say so or offer to fetch it.",
     "For everything else — general knowledge, explanations, debugging, advice, drafting — just answer directly from your own expertise.",
     "When it matters, distinguish confirmed portal facts from your own assumptions or suggestions.",
@@ -742,6 +744,27 @@ const REALTIME_TOOLS = [
         },
       },
       required: ["service", "functionName"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "orchestrate_assistant_request",
+    description:
+      "Answer a general question through the portal's deterministic orchestrator: internal documentation/KB (Genny Studio), code/repo search, summaries and action-item extraction, read-only Microsoft 365 lookups, or item research. Prefer this over ask_portal_question for documentation, policy, code, or 'how does X work' questions. Returns a concise speakable answer; richer blocks/sources go to the UI as metadata.",
+    parameters: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The user's question, phrased completely and self-contained.",
+        },
+        context: {
+          type: "string",
+          description: "Optional extra context (item details, a prior answer being referenced).",
+        },
+      },
+      required: ["question"],
       additionalProperties: false,
     },
   },
@@ -1116,7 +1139,7 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantController }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantController, orchestrator }) {
   const app = express();
 
   app.disable("x-powered-by");
@@ -1375,6 +1398,8 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
           }
 
           const payload = await buildAskPayload({
+            config,
+            orchestrator,
             asker: runtimeAsker,
             prompt,
             model: request.body?.model,
@@ -1951,45 +1976,109 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
   // Current assistant chat model + embedding mode/model/reachability.
   app.get("/api/assistant/model-status", async (request, response, next) => {
     try {
+      const docs = docsKbService?.describe?.() ?? { enabled: false };
+      const code = codeKbService?.describe?.() ?? { enabled: false };
+      const embeddings = {
+        docs: { enabled: docs.enabled, mode: docs.embeddingMode ?? null, model: docs.embeddingModel ?? null },
+        code: { enabled: code.enabled, mode: code.embeddingMode ?? null, model: code.embeddingModel ?? null },
+      };
+
+      if (config.assistantModelMode === "orchestrator" && orchestrator) {
+        response.json({
+          ok: true,
+          chat: {
+            mode: "orchestrator",
+            provider: "orchestrator",
+            model: "deterministic-router",
+            enabled: true,
+            reachable: null,
+            reason: null,
+          },
+          embeddings,
+          orchestrator: orchestrator.describe(),
+        });
+        return;
+      }
+
       if (!assistantModelProvider) {
         response.status(503).json({ ok: false, error: "Assistant model provider is not configured." });
         return;
       }
 
       const chat = await assistantModelProvider.describe();
-      const docs = docsKbService?.describe?.() ?? { enabled: false };
-      const code = codeKbService?.describe?.() ?? { enabled: false };
       response.json({
         ok: true,
         chat,
-        embeddings: {
-          docs: { enabled: docs.enabled, mode: docs.embeddingMode ?? null, model: docs.embeddingModel ?? null },
-          code: { enabled: code.enabled, mode: code.embeddingMode ?? null, model: code.embeddingModel ?? null },
-        },
+        embeddings,
       });
     } catch (error) {
       next(error);
     }
   });
 
-  // Text assistant chat — local/cloud model, server-orchestrated tool-calling
-  // loop. Mutations are never executed here; they come back as
-  // proposedActions for the UI to confirm or cancel.
+  // Text assistant chat. Default mode is the deterministic orchestrator (no
+  // reasoning model, no Graph sign-in required for non-Graph routes). Legacy
+  // cloud/local modes keep the tool-calling controller. Mutations are never
+  // executed here in any mode; the deterministic path never even proposes
+  // them, and the legacy path returns proposedActions for the UI to confirm.
   app.post("/api/assistant/chat", async (request, response, next) => {
     try {
-      if (!assistantController) {
-        response.status(503).json({ ok: false, error: "Assistant is not configured." });
-        return;
-      }
-
       const messages = Array.isArray(request.body?.messages) ? request.body.messages : [];
       if (!messages.length) {
         response.status(400).json({ ok: false, error: "messages is required." });
         return;
       }
 
+      if (config.assistantModelMode === "orchestrator" && orchestrator) {
+        const normalized = messages.filter(
+          (m) =>
+            m &&
+            (m.role === "user" || m.role === "assistant") &&
+            typeof m.content === "string"
+        );
+        const lastUser = [...normalized].reverse().find((m) => m.role === "user");
+        if (!lastUser || !lastUser.content.trim()) {
+          response.status(400).json({ ok: false, error: "A user message is required." });
+          return;
+        }
+
+        const result = await orchestrator.ask({
+          prompt: lastUser.content,
+          history: normalized.slice(-20)
+        });
+        response.json({
+          ok: true,
+          content: result.content,
+          answer: result.answer,
+          blocks: result.blocks,
+          sources: result.sources,
+          proposedActions: [],
+          toolTrace: result.toolTrace,
+          provider: result.provider,
+          route: result.route,
+          model: result.model ?? "deterministic-router",
+          modelMode: "orchestrator"
+        });
+        return;
+      }
+
+      if (!assistantController || !assistantModelProvider) {
+        response.status(503).json({ ok: false, error: "Assistant is not configured." });
+        return;
+      }
+
       const result = await assistantController.handleChat({ messages });
-      response.json({ ok: true, ...result });
+      response.json({
+        ok: true,
+        ...result,
+        answer: result.content,
+        blocks:
+          typeof result.content === "string" && result.content
+            ? [textBlock(result.content)]
+            : [],
+        provider: result.modelMode === "local" ? "ollama" : "cloud",
+        route: `legacy_${result.modelMode}`
+      });
     } catch (error) {
       if (error?.statusCode) {
         response.status(error.statusCode).json({ ok: false, error: error.message });
@@ -2475,12 +2564,70 @@ async function buildParserPayload({
   };
 }
 
-async function buildAskPayload({ asker, prompt, model, provider, threadId }) {
-  return asker.ask(prompt, {
+// Resolves the effective ask provider (explicit request body beats config),
+// then dispatches: "orchestrator" → deterministic router; "local" → archived
+// unless the legacy flag is set; anything else → the legacy ask service.
+// Every branch returns the legacy fields (enabled/provider/model/reason/
+// prompt/answer/debug) plus the additive blocks/sources/toolTrace/route.
+async function buildAskPayload({ config, orchestrator, asker, prompt, model, provider, threadId }) {
+  const requested = typeof provider === "string" ? provider.trim().toLowerCase() : "";
+  const resolved = requested || config?.askProvider || "";
+
+  if (resolved === "orchestrator" && orchestrator) {
+    const result = await orchestrator.ask({ prompt });
+    return {
+      enabled: true,
+      provider: result.provider,
+      model: result.model ?? null,
+      reason: null,
+      prompt,
+      answer: result.answer,
+      blocks: result.blocks,
+      sources: result.sources,
+      toolTrace: result.toolTrace,
+      route: result.route,
+      debug: {
+        ...(result.debug ?? {}),
+        provider: result.provider,
+        endpoint: "/api/ask",
+        mode: "orchestrator",
+        route: result.route,
+        responseVersion: "2026-07-ask-v2"
+      }
+    };
+  }
+
+  if (resolved === "local" && !config?.legacyLocalRagEnabled) {
+    const reason =
+      "Local ask is archived. Set LEGACY_LOCAL_RAG_ENABLED=true in .env to re-enable it.";
+    return {
+      enabled: false,
+      provider: "local",
+      model: null,
+      reason,
+      prompt,
+      answer: reason,
+      blocks: [textBlock(reason)],
+      sources: [],
+      toolTrace: [],
+      route: "legacy_local",
+      debug: { provider: "local", endpoint: "/api/ask", mode: "direct" }
+    };
+  }
+
+  const legacy = await asker.ask(prompt, {
     model,
     provider,
     threadId
   });
+  return {
+    ...legacy,
+    blocks:
+      typeof legacy?.answer === "string" && legacy.answer ? [textBlock(legacy.answer)] : [],
+    sources: [],
+    toolTrace: [],
+    route: `legacy_${legacy?.provider ?? "unknown"}`
+  };
 }
 
 async function buildDashboardPayload({

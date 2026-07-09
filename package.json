@@ -17,10 +17,11 @@
     "bundle:localhost": "node scripts/build-localhost-shareable-bundle.js",
     "open:portal-profile": "node scripts/open-portal-profile.js",
     "smoke": "node scripts/smoke-test.js",
-    "rag:health": "node scripts/rag-health-check.js",
-    "rag:index-check": "node scripts/rag-index-check.js",
-    "rag:golden-test": "node scripts/rag-golden-test.js",
-    "rag:ask": "node scripts/rag-ask.js"
+    "test:orchestrator": "node scripts/test-orchestrator-routing.js",
+    "legacy:rag:health": "node scripts/rag-health-check.js",
+    "legacy:rag:index-check": "node scripts/rag-index-check.js",
+    "legacy:rag:golden-test": "node scripts/rag-golden-test.js",
+    "legacy:rag:ask": "node scripts/rag-ask.js"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

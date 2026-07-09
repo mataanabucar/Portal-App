@@ -98,6 +98,11 @@ interface AskToolArgs {
   itemContext?: unknown;
 }
 
+interface OrchestrateToolArgs {
+  question?: unknown;
+  context?: unknown;
+}
+
 interface DocsToolArgs {
   query?: unknown;
 }
@@ -284,6 +289,8 @@ export function useRealtimeAssistant({
           return runGetItemEmailContext(args as EmailToolArgs);
         case "ask_portal_question":
           return runAskPortalQuestion(args as AskToolArgs);
+        case "orchestrate_assistant_request":
+          return runOrchestrateAssistantRequest(args as OrchestrateToolArgs);
         case "search_docs":
           return runSearchDocs(args as DocsToolArgs);
         case "send_email":
@@ -672,6 +679,51 @@ export function useRealtimeAssistant({
       provider: payload.provider,
       model: payload.model,
       answer: normalizeText(payload.answer),
+    };
+  }
+
+  // Voice-side entry into the deterministic orchestrator: POSTs the existing
+  // /api/ask (orchestrator is the default provider) and returns a compact,
+  // speakable answer. The Realtime model only compresses/speaks the already-
+  // selected provider output — it never re-answers from its own knowledge.
+  async function runOrchestrateAssistantRequest({ question, context }: OrchestrateToolArgs) {
+    const normalizedQuestion = normalizeText(question);
+    if (!normalizedQuestion) {
+      return { ok: false, error: "orchestrate_assistant_request requires question." };
+    }
+
+    const normalizedContext = normalizeText(context);
+    const prompt = normalizedContext
+      ? `${normalizedQuestion}\n\nContext:\n${normalizedContext}`
+      : normalizedQuestion;
+
+    const response = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+
+    if (!response.ok) {
+      const payload = (await response
+        .json()
+        .catch(() => ({ error: response.statusText }))) as { error?: string };
+      throw new Error(payload.error || response.statusText);
+    }
+
+    const payload = (await response.json()) as {
+      enabled?: boolean;
+      provider?: string;
+      route?: string;
+      answer?: string;
+      sources?: unknown[];
+    };
+
+    return {
+      ok: payload.enabled !== false,
+      provider: payload.provider,
+      route: payload.route,
+      answer: buildSpeakableAnswer(payload.answer),
+      sourceCount: Array.isArray(payload.sources) ? payload.sources.length : 0,
     };
   }
 
@@ -1132,6 +1184,8 @@ function formatToolLabel(toolName: string) {
       return "Checking email context...";
     case "ask_portal_question":
       return "Reviewing portal context...";
+    case "orchestrate_assistant_request":
+      return "Consulting the orchestrator...";
     case "search_docs":
       return "Searching documentation...";
     case "search_emails":
@@ -1153,6 +1207,21 @@ function formatToolLabel(toolName: string) {
 
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+// Compresses an orchestrator answer into something comfortable to speak:
+// strips code fences and markdown scaffolding, collapses table-ish lines,
+// and caps the length. The full blocks stay in the UI response.
+function buildSpeakableAnswer(value: unknown): string {
+  const text = normalizeText(value);
+  if (!text) return "No answer was found.";
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, " (code omitted) ")
+    .replace(/^\s*\|.*\|\s*$/gm, "")
+    .replace(/[#*_`>]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.length > 800 ? `${cleaned.slice(0, 800)}…` : cleaned;
 }
 
 function normalizeEmailRecipients(value: unknown): string[] {

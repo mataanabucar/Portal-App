@@ -190,17 +190,38 @@ The app has separate AI paths. Do not assume one setting controls all model traf
 - `/api/assistant/chat` uses `ASSISTANT_MODEL_MODE`.
 - Parser and summary behavior use their own provider settings in `src/server/config/env.js`.
 
-Local assistant defaults:
+Both `/api/ask` and `/api/assistant/chat` default to the **deterministic
+orchestrator** (`src/server/services/orchestrator/`), which routes each
+question by keywords — no local or cloud reasoning model required:
+
+| Question style | Route | Answered by |
+| --- | --- | --- |
+| Summarize pasted text / this conversation | `summary_*` | TeamGPT |
+| Action items / follow-ups from pasted text | `action_items` | TeamGPT (structured JSON) |
+| Mail / calendar / Teams / profile (read-only) | `graph` | Microsoft Graph |
+| Code / repo / "where is X implemented" | `code` | Sourcebot |
+| Research / investigate / item context attached | `research` | Research pipeline (aris_search-first) |
+| Docs / KB / policy / everything else | `docs_kb` | GennyStudio `aris_search` (KB fallback) |
+
+Defaults:
 
 ```env
-ASK_PROVIDER=local
-ASSISTANT_MODEL_MODE=local
-LOCAL_LLM_BASE_URL=http://localhost:11434/v1
-LOCAL_LLM_MODEL=llama3.2:3b
-LOCAL_LLM_API_KEY=ollama
+ASK_PROVIDER=orchestrator
+ASSISTANT_MODEL_MODE=orchestrator
+ASSISTANT_EMBEDDING_MODE=disabled
+SUMMARY_PROVIDER=teamgpt
+PARSER_PROVIDER=teamgpt
 ```
 
-OpenAI summary is opt-in:
+The old local Ollama + local RAG path is archived behind
+`LEGACY_LOCAL_RAG_ENABLED=true` (see `docs/local-rag-assistant.md`); its
+scripts are now `npm run legacy:rag:*`. You do not need Ollama running for the
+default setup. Verify orchestrator routing with `npm run test:orchestrator`
+(mock-based, offline) or `./scripts/test-orchestrator.ps1` against a running
+server.
+
+OpenAI is used for Realtime speech I/O only by default (plus two off-by-default
+orchestrator hooks — see `.env.example`). OpenAI summary is opt-in:
 
 ```env
 OPENAI_ENABLED=true
