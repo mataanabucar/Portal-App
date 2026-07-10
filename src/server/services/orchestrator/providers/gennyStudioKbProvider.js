@@ -4,6 +4,7 @@
 // excerpts (callKBX.cfm) when GennyStudio is disabled, empty, or erroring.
 
 import { collectKbResearch } from "../../kb/research.js";
+import { augmentPromptForBambooImages } from "../../assistant/bambooImageHooks.js";
 import { textBlock, tableBlock } from "../responseBlocks.js";
 
 const HISTORY_TURNS = 3;
@@ -137,6 +138,7 @@ async function runKbFallback({ prompt, kbService, kbUploadMarker, toolTrace, opt
 }
 
 function buildPrompt(prompt, history, kbUploadMarker = "") {
+  const enhancedPrompt = augmentPromptForBambooImages(prompt);
   // The user's own uploaded reference docs (org charts, scopes, context
   // packages) all carry this marker in the KB. A plain-language question like
   // "super group a" ranks poorly against the whole org KB, so tell the agent
@@ -162,9 +164,9 @@ function buildPrompt(prompt, history, kbUploadMarker = "") {
     );
 
   if (turns.length === 0) {
-    return `${prompt}${markerHint}`;
+    return `${enhancedPrompt}${markerHint}`;
   }
-  return `Recent conversation:\n${turns.join("\n")}\n\nQuestion:\n${prompt}${markerHint}`;
+  return `Recent conversation:\n${turns.join("\n")}\n\nQuestion:\n${enhancedPrompt}${markerHint}`;
 }
 
 function safeDescribe(service) {

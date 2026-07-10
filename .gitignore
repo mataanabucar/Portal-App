@@ -20,7 +20,7 @@ notes/powershellTextWorking.txt
 coverage/
 npm-debug.log*
 dist/
-
+CodeLogs/
 
 # local cleanup/archive output
 cleanup-archive/

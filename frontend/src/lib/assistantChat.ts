@@ -10,6 +10,7 @@ export interface AssistantChatMessage {
 
 export interface AssistantSource {
   type: "app_doc" | "code" | "kb" | "gstudio" | "graph" | "teamgpt" | "research";
+  id?: string;
   title: string;
   path: string;
   heading?: string;
@@ -92,6 +93,32 @@ export interface AssistantToolTraceEntry {
   tool: string;
   args: Record<string, unknown>;
   resultSummary: string;
+}
+
+export type AssistantResponseLength = "concise" | "detailed";
+
+export interface ConversationArtifact {
+  id: string;
+  question: string;
+  answer: string;
+  createdAt: string;
+  blocks?: ResponseBlock[];
+  sources?: AssistantSource[];
+  route?: string;
+  provider?: string;
+}
+
+export interface AssistantChatEntry {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  blocks?: ResponseBlock[];
+  sources?: AssistantSource[];
+  proposedActions?: AssistantProposedAction[];
+  provider?: string;
+  route?: string;
+  error?: boolean;
 }
 
 export interface AssistantChatResponse {
@@ -185,3 +212,20 @@ export const assistantChat = {
   getCapabilities: () => get<AssistantCapabilitiesResponse>("/api/assistant/capabilities"),
   getModelStatus: () => get<AssistantModelStatusResponse>("/api/assistant/model-status"),
 };
+
+export function withResponseLengthHint(
+  prompt: string,
+  responseLength: AssistantResponseLength
+) {
+  const normalizedPrompt = prompt.trim();
+  if (!normalizedPrompt) {
+    return "";
+  }
+
+  const hint =
+    responseLength === "concise"
+      ? "Respond concisely. Keep the answer tight unless extra detail is necessary."
+      : "Respond in more detail. Include context and concrete steps when they help.";
+
+  return `${hint}\n\n${normalizedPrompt}`;
+}

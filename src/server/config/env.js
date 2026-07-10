@@ -169,6 +169,16 @@ export function buildConfig(overrides = {}) {
       process.env.GENNYSTUDIO_REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "20000",
       10
     ),
+    bambooImageCookie: process.env.BAMBOO_IMAGE_COOKIE || "",
+    bambooImageReferer:
+      process.env.BAMBOO_IMAGE_REFERER || "https://benchmarkgensuite.bamboohr.com/",
+    bambooImageUserAgent:
+      process.env.BAMBOO_IMAGE_USER_AGENT ||
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+    bambooImageRequestTimeoutMs: Number.parseInt(
+      process.env.BAMBOO_IMAGE_REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "20000",
+      10
+    ),
 
     // Microsoft Graph / Azure AD
     graphTenantId:      process.env.GRAPH_TENANT_ID      || "",

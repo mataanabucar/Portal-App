@@ -1,41 +1,199 @@
 "use client";
 
-import { FileCode, FileText } from "lucide-react";
+import { Check, Copy, FileCode, FileText } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useState } from "react";
+import { MermaidDiagram } from "@/components/MermaidDiagram";
+import {
+  looksLikeHtmlContent,
+  sanitizeHtmlContent,
+} from "@/lib/sanitizeHtml";
 import type {
   ActionItemData,
   AssistantSource,
   ResponseBlock,
   TableBlockData,
 } from "@/lib/assistantChat";
-import { MermaidDiagram } from "@/components/MermaidDiagram";
 
-// Renders the orchestrator's structured response blocks. Everything goes
-// through JSX text nodes — no dangerouslySetInnerHTML anywhere. Image URLs
-// are restricted to http/https or app-relative paths.
+const SPECIAL_FENCE = /```(mermaid|html)\s*\n([\s\S]*?)```/g;
 
-export function ResponseBlocks({ blocks }: { blocks: ResponseBlock[] }) {
+export function CopyResponseButton({ text }: { text: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "error">("idle");
+  const canCopy = Boolean(text.trim());
+  const label =
+    status === "copied"
+      ? "Response copied"
+      : status === "error"
+        ? "Copy failed"
+        : "Copy response";
+
+  async function handleCopy() {
+    if (!canCopy) {
+      return;
+    }
+
+    try {
+      await writeClipboardText(text);
+      setStatus("copied");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleCopy()}
+      disabled={!canCopy}
+      aria-label={label}
+      title={label}
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-700/80 bg-slate-950/45 text-slate-400 transition-colors hover:border-cyan-500/50 hover:text-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {status === "copied" ? (
+        <Check className="h-3.5 w-3.5 text-emerald-300" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+    </button>
+  );
+}
+
+export function ResponseBlocks({
+  blocks,
+  showSources = true,
+}: {
+  blocks: ResponseBlock[];
+  showSources?: boolean;
+}) {
   return (
     <div className="space-y-2">
       {blocks.map((block, index) => (
-        <BlockRenderer key={index} block={block} />
+        <BlockRenderer
+          key={index}
+          block={block}
+          showSources={showSources}
+        />
       ))}
     </div>
   );
 }
 
-function BlockRenderer({ block }: { block: ResponseBlock }) {
+export function RichText({ content }: { content: string }) {
+  const value = content || "";
+  if (!value.includes("```mermaid") && !value.includes("```html")) {
+    if (looksLikeHtmlContent(value)) {
+      return <HtmlPreview html={value} />;
+    }
+    return <MarkdownText content={value} />;
+  }
+
+  const parts: Array<{ kind: "text" | "mermaid" | "html"; content: string }> =
+    [];
+  let lastIndex = 0;
+
+  for (const match of value.matchAll(SPECIAL_FENCE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      parts.push({ kind: "text", content: value.slice(lastIndex, index) });
+    }
+    parts.push({
+      kind: match[1] === "html" ? "html" : "mermaid",
+      content: match[2],
+    });
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push({ kind: "text", content: value.slice(lastIndex) });
+  }
+
+  return (
+    <div className="space-y-2">
+      {parts.map((part, index) =>
+        part.kind === "mermaid" ? (
+          <MermaidDiagram key={index} code={part.content} />
+        ) : part.kind === "html" ? (
+          <HtmlPreview key={index} html={part.content} />
+        ) : part.content.trim() ? (
+          <MarkdownText key={index} content={part.content} />
+        ) : null
+      )}
+    </div>
+  );
+}
+
+function HtmlPreview({ html }: { html: string }) {
+  const sanitizedHtml = sanitizeHtmlContent(html);
+
+  if (!sanitizedHtml) {
+    return null;
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-[22px] border border-slate-700/80 bg-white p-3 text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.3)]">
+      <div
+        className="assistant-rendered-html prose prose-sm max-w-none text-slate-900 prose-headings:text-slate-900 prose-p:text-slate-800 prose-strong:text-slate-900 prose-a:text-cyan-700 prose-code:text-slate-900"
+        dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
+      />
+    </div>
+  );
+}
+
+export function SourceChip({
+  source,
+  className,
+}: {
+  source: AssistantSource;
+  className?: string;
+}) {
+  const Icon = source.type === "code" ? FileCode : FileText;
+  const lineRange =
+    source.type === "code" && source.startLine
+      ? `:${source.startLine}${
+          source.endLine && source.endLine !== source.startLine
+            ? `-${source.endLine}`
+            : ""
+        }`
+      : "";
+  const label = source.path || source.title || source.id || "Source";
+
+  return (
+    <span
+      title={source.snippet}
+      className={[
+        "inline-flex max-w-[240px] items-center gap-1 truncate rounded-full border border-slate-700/80 bg-slate-950/60 px-2.5 py-1 text-[11px] text-slate-300",
+        className ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <Icon className="h-3 w-3 shrink-0" />
+      <span className="truncate">
+        {label}
+        {lineRange}
+      </span>
+    </span>
+  );
+}
+
+function BlockRenderer({
+  block,
+  showSources,
+}: {
+  block: ResponseBlock;
+  showSources: boolean;
+}) {
   switch (block.type) {
     case "text":
-      return <TextWithDiagrams text={block.text} />;
+      return <RichText content={block.text} />;
     case "summary":
       return (
-        <div className="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-3">
+        <div className="rounded-[22px] border border-slate-700/80 bg-slate-950/40 p-3">
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
             {block.title || "Summary"}
           </p>
-          <p className="whitespace-pre-wrap">{block.text}</p>
+          <RichText content={block.text} />
         </div>
       );
     case "table":
@@ -49,28 +207,27 @@ function BlockRenderer({ block }: { block: ResponseBlock }) {
         </div>
       );
     case "sources":
-      return (
+      return showSources ? (
         <div className="flex flex-wrap gap-1.5">
           {block.sources.map((source, index) => (
-            <BlockSourceChip key={`${source.path}-${index}`} source={source} />
+            <SourceChip key={`${source.path}-${index}`} source={source} />
           ))}
         </div>
-      );
+      ) : null;
     case "image":
       return isSafeImageUrl(block.url) ? (
         // eslint-disable-next-line @next/next/no-img-element -- remote hosts
-        // aren't preconfigured for next/image; plain img with a strict URL
-        // allowlist is the deliberate choice here.
+        // are not preconfigured for next/image in this app.
         <img
           src={block.url}
           alt={block.alt || "Image"}
           loading="lazy"
-          className="max-w-full rounded-2xl border border-slate-700/80"
+          className="max-w-full rounded-[22px] border border-slate-700/80"
         />
       ) : null;
     case "chart":
       return (
-        <div className="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-3">
+        <div className="rounded-[22px] border border-slate-700/80 bg-slate-950/40 p-3">
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
             {block.title || "Chart"}
           </p>
@@ -88,72 +245,45 @@ function BlockRenderer({ block }: { block: ResponseBlock }) {
   }
 }
 
-// Text blocks may carry ```mermaid fences (e.g. a KB answer describing a
-// workflow). Render those as live diagrams and everything around them as
-// plain pre-wrapped text.
-const MERMAID_FENCE = /```mermaid\s*\n([\s\S]*?)```/g;
-
-function TextWithDiagrams({ text }: { text: string }) {
-  const value = text || "";
-  if (!value.includes("```mermaid")) {
-    return <MarkdownText content={value} />;
-  }
-
-  const parts: Array<{ kind: "text" | "mermaid"; content: string }> = [];
-  let lastIndex = 0;
-  for (const match of value.matchAll(MERMAID_FENCE)) {
-    const index = match.index ?? 0;
-    if (index > lastIndex) {
-      parts.push({ kind: "text", content: value.slice(lastIndex, index) });
-    }
-    parts.push({ kind: "mermaid", content: match[1] });
-    lastIndex = index + match[0].length;
-  }
-  if (lastIndex < value.length) {
-    parts.push({ kind: "text", content: value.slice(lastIndex) });
-  }
-
-  return (
-    <div className="space-y-2">
-      {parts.map((part, index) =>
-        part.kind === "mermaid" ? (
-          <MermaidDiagram key={index} code={part.content} />
-        ) : (
-          part.content.trim() && <MarkdownText key={index} content={part.content} />
-        )
-      )}
-    </div>
-  );
-}
-
-// KB/GennyStudio answers arrive as markdown (headings, bold, tables) — render
-// them as formatted HTML via react-markdown (JSX output, no raw HTML pass-
-// through), matching the panel's slate palette.
 function MarkdownText({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
         p: ({ children }) => (
-          <p className="mb-2 whitespace-pre-wrap leading-6 last:mb-0">{children}</p>
+          <p className="mb-2 whitespace-pre-wrap leading-6 last:mb-0">
+            {children}
+          </p>
         ),
         h1: ({ children }) => (
-          <p className="mb-1 mt-2 text-sm font-bold text-slate-100">{children}</p>
+          <p className="mb-1 mt-2 text-sm font-bold text-slate-100">
+            {children}
+          </p>
         ),
         h2: ({ children }) => (
-          <p className="mb-1 mt-2 text-sm font-bold text-slate-100">{children}</p>
+          <p className="mb-1 mt-2 text-sm font-bold text-slate-100">
+            {children}
+          </p>
         ),
         h3: ({ children }) => (
-          <p className="mb-1 mt-2 text-sm font-semibold text-slate-100">{children}</p>
+          <p className="mb-1 mt-2 text-sm font-semibold text-slate-100">
+            {children}
+          </p>
         ),
         h4: ({ children }) => (
-          <p className="mb-1 mt-2 text-sm font-semibold text-slate-200">{children}</p>
+          <p className="mb-1 mt-2 text-sm font-semibold text-slate-200">
+            {children}
+          </p>
         ),
         ul: ({ children }) => (
-          <ul className="mb-2 list-disc list-outside space-y-0.5 pl-4">{children}</ul>
+          <ul className="mb-2 list-disc list-outside space-y-0.5 pl-4">
+            {children}
+          </ul>
         ),
         ol: ({ children }) => (
-          <ol className="mb-2 list-decimal list-outside space-y-0.5 pl-4">{children}</ol>
+          <ol className="mb-2 list-decimal list-outside space-y-0.5 pl-4">
+            {children}
+          </ol>
         ),
         li: ({ children }) => <li className="leading-6">{children}</li>,
         strong: ({ children }) => (
@@ -164,7 +294,7 @@ function MarkdownText({ content }: { content: string }) {
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-violet-300 underline underline-offset-2 hover:text-violet-200 break-all"
+            className="break-all text-violet-300 underline underline-offset-2 hover:text-violet-200"
           >
             {children}
           </a>
@@ -252,33 +382,48 @@ function BlockTable({ table }: { table: TableBlockData }) {
 function ActionItemCard({ item }: { item: ActionItemData }) {
   const meta = [item.owner, item.dueDate, item.priority, item.status]
     .filter(Boolean)
-    .join(" · ");
+    .join(" | ");
+
   return (
-    <div className="rounded-2xl border border-slate-700/80 bg-slate-950/40 px-3 py-2">
+    <div className="rounded-[22px] border border-slate-700/80 bg-slate-950/40 px-3 py-2">
       <p className="text-sm text-slate-100">{item.title}</p>
       {meta && <p className="mt-0.5 text-xs text-slate-400">{meta}</p>}
       {item.sourceText && (
-        <p className="mt-0.5 text-xs italic text-slate-500">{item.sourceText}</p>
+        <p className="mt-0.5 text-xs italic text-slate-500">
+          {item.sourceText}
+        </p>
       )}
     </div>
   );
 }
 
-function BlockSourceChip({ source }: { source: AssistantSource }) {
-  const Icon = source.type === "code" ? FileCode : FileText;
-  return (
-    <span
-      title={source.snippet}
-      className="inline-flex max-w-[220px] items-center gap-1 truncate rounded-full border border-slate-700/80 bg-slate-950/60 px-2.5 py-1 text-[11px] text-slate-300"
-    >
-      <Icon className="h-3 w-3 shrink-0" />
-      <span className="truncate">{source.path || source.title}</span>
-    </span>
-  );
+function isSafeImageUrl(url: string): boolean {
+  if (typeof url !== "string" || !url) {
+    return false;
+  }
+  if (/^https?:\/\//i.test(url)) {
+    return true;
+  }
+  return url.startsWith("/") && !url.startsWith("//");
 }
 
-function isSafeImageUrl(url: string): boolean {
-  if (typeof url !== "string" || !url) return false;
-  if (/^https?:\/\//i.test(url)) return true;
-  return url.startsWith("/") && !url.startsWith("//");
+async function writeClipboardText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("Clipboard access is unavailable.");
+  }
 }

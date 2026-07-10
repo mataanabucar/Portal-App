@@ -182,3 +182,48 @@ file-existence branches, the port loop, and the path to `npm run dev`
 evaluated correctly; confirmed `.local-auth/graph-tester-token.json` is
 currently present. Did not run start-all.bat live (its port-kill would
 terminate the user's active dev server).
+
+## Addendum 4 (same session): Genny Assistant dock refinement pass
+
+Corrections to the two-pane dock redesign after user testing (frontend only):
+
+- `frontend/src/components/assistant/RealtimeAssistantDock.tsx`
+  - Header rebuilt as two mockup-matching flex rows of h-11 pills (row 1:
+    VOICE|TEXT · status · persona preset · MIC CLEANUP; row 2: Start session ·
+    Stop (only while speaking) · Mute · Clear log · CONCISE|DETAILED ·
+    Citations). Stacked "Persona"/"Response length" labels removed.
+  - MIC CLEANUP toggle now fills cyan when open (same active styling as the
+    response-length segments).
+  - Mic cleanup panel moved out of the header into an absolutely-positioned
+    overlay (right-aligned, own max-height + scroll) so opening it never
+    resizes the conversation or overflows the modal.
+  - Conversation is now the modal's single scroll region (`conversationRef`,
+    flex-1): EmailConfirmation/error/log all live inside it; the voice log's
+    nested scroll box was removed and `AssistantChatPanel` renders `embedded`.
+  - Autoscroll fixed: was force-jumping to the bottom every frame because the
+    mic meter re-renders the dock ~60fps and the effect was keyed on a
+    rebuilt-array identity. Now `voiceTimeline`/`suggestedActions` are
+    `useMemo`ed, the effect keys on a stable content signal
+    (`buildTimelineSignal`), and it only sticks to bottom when the user is
+    already near it (`onScroll` + `isNearBottomRef`, 80px threshold).
+  - `VoiceConversationLog` wrapped in `React.memo` (stable entries) so mic
+    frames skip the conversation subtree entirely.
+  - Suggested actions compacted per the user's manual DOM tweak: wrapper
+    `px-2 py-2`, section `p-1`, header row `px-3`; collapsed helper text
+    removed. Dead `TopSettingsBar`/`PanelSection` components deleted.
+  - Stop button added to the collapsed quick bar too.
+- `frontend/src/lib/realtimeAssistant.ts` — client `cancelResponse()` sends
+  `response.cancel` over the data channel (interrupts speech generation;
+  already-buffered audio may finish its last moment).
+- `frontend/src/hooks/useRealtimeAssistant.ts` — `stopResponse()` wraps
+  `cancelResponse` and flips `speaking` → `listening`; returned by the hook.
+- `frontend/src/components/assistant/AssistantChatPanel.tsx` — new `embedded`
+  prop: parent owns the single scroll region + autoscroll; panel renders
+  bubbles directly (standalone behavior unchanged).
+- `frontend/src/components/MermaidDiagram.tsx` — `React.memo` on `code` so
+  rendered SVGs don't churn on mic-meter frames.
+
+Validation: `npm --prefix frontend run build` — compiled + TypeScript clean.
+Manual checks still to run in the browser: scroll-up stays put while the bot
+streams, mic overlay doesn't shift layout, Stop interrupts speech, top bar
+matches the mockup.

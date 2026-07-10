@@ -4,6 +4,8 @@
 // should use `text` directly as the report body and skip OpenAI/TeamGPT
 // synthesis when this succeeds.
 
+import { augmentPromptForBambooImages } from "../assistant/bambooImageHooks.js";
+
 export async function collectArisSearchResearch({
   gennyStudioService,
   itemContext,
@@ -78,7 +80,7 @@ function buildPrompt(itemContext, userQuery) {
   if (normalizeText(itemContext)) {
     parts.push(`Portal item context:\n${itemContext.trim()}`);
   }
-  parts.push(`Question:\n${normalizeText(userQuery)}`);
+  parts.push(`Question:\n${augmentPromptForBambooImages(normalizeText(userQuery))}`);
   return parts.join("\n\n");
 }
 

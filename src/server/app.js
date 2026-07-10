@@ -38,6 +38,7 @@ import { runResearchPipeline } from "./services/sourcebot/researchPipeline.js";
 import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 import { buildFriendlyCapabilities } from "./services/graph/assistantCapabilities.js";
 import { textBlock } from "./services/orchestrator/responseBlocks.js";
+import { appendAssistantConversationLog } from "./services/assistant/conversationLog.js";
 
 const publicDirectory = fileURLToPath(new URL("../../public/", import.meta.url));
 
@@ -1139,8 +1140,12 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantController, orchestrator }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantBambooImageHooks, assistantController, orchestrator }) {
   const app = express();
+  const rewriteAssistantPayload = ({ prompt, payload }) =>
+    assistantBambooImageHooks?.rewriteAssistantPayload
+      ? assistantBambooImageHooks.rewriteAssistantPayload({ prompt, payload })
+      : payload;
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
@@ -2016,6 +2021,46 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
     }
   });
 
+  app.get("/api/assistant/bamboo-image", async (request, response, next) => {
+    try {
+      if (!assistantBambooImageHooks?.fetchImage) {
+        response.status(503).json({ ok: false, error: "Bamboo image proxy is not configured." });
+        return;
+      }
+
+      const requestedUrl = firstQueryValue(request.query?.url);
+      const placeholderRequested = ["1", "true", "yes"].includes(
+        String(firstQueryValue(request.query?.placeholder) || "").toLowerCase()
+      );
+      if (!requestedUrl && !placeholderRequested) {
+        response.status(400).json({ ok: false, error: "url or placeholder is required." });
+        return;
+      }
+
+      const result = placeholderRequested
+        ? await assistantBambooImageHooks.fetchPlaceholder()
+        : await assistantBambooImageHooks.fetchImage(requestedUrl);
+      response.setHeader("Content-Type", result.contentType);
+      response.setHeader("Cache-Control", result.cacheControl);
+      if (result.etag) {
+        response.setHeader("ETag", result.etag);
+      }
+      if (result.lastModified) {
+        response.setHeader("Last-Modified", result.lastModified);
+      }
+      if (Number.isFinite(result.contentLength) && result.contentLength > 0) {
+        response.setHeader("Content-Length", String(result.contentLength));
+      }
+      response.send(result.buffer);
+    } catch (error) {
+      if (error?.statusCode) {
+        response.status(error.statusCode).json({ ok: false, error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
   // Text assistant chat. Default mode is the deterministic orchestrator (no
   // reasoning model, no Graph sign-in required for non-Graph routes). Legacy
   // cloud/local modes keep the tool-calling controller. Mutations are never
@@ -2028,15 +2073,11 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
         response.status(400).json({ ok: false, error: "messages is required." });
         return;
       }
+      const normalizedMessages = normalizeAssistantChatLogMessages(messages);
+      const lastUser = [...normalizedMessages].reverse().find((message) => message.role === "user");
+      const lastUserPrompt = lastUser?.content || "";
 
       if (config.assistantModelMode === "orchestrator" && orchestrator) {
-        const normalized = messages.filter(
-          (m) =>
-            m &&
-            (m.role === "user" || m.role === "assistant") &&
-            typeof m.content === "string"
-        );
-        const lastUser = [...normalized].reverse().find((m) => m.role === "user");
         if (!lastUser || !lastUser.content.trim()) {
           response.status(400).json({ ok: false, error: "A user message is required." });
           return;
@@ -2044,21 +2085,31 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
 
         const result = await orchestrator.ask({
           prompt: lastUser.content,
-          history: normalized.slice(-20)
+          history: normalizedMessages.slice(-20)
         });
-        response.json({
-          ok: true,
-          content: result.content,
-          answer: result.answer,
-          blocks: result.blocks,
-          sources: result.sources,
-          proposedActions: [],
-          toolTrace: result.toolTrace,
-          provider: result.provider,
-          route: result.route,
-          model: result.model ?? "deterministic-router",
-          modelMode: "orchestrator"
+        const payload = rewriteAssistantPayload({
+          prompt: lastUserPrompt,
+          payload: {
+            ok: true,
+            content: result.content,
+            answer: result.answer,
+            blocks: result.blocks,
+            sources: result.sources,
+            proposedActions: [],
+            toolTrace: result.toolTrace,
+            provider: result.provider,
+            route: result.route,
+            model: result.model ?? "deterministic-router",
+            modelMode: "orchestrator"
+          }
         });
+        appendAssistantConversationLog(
+          buildAssistantChatLogEntry({
+            messages: normalizedMessages,
+            responsePayload: payload,
+          })
+        );
+        response.json(payload);
         return;
       }
 
@@ -2068,17 +2119,29 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       }
 
       const result = await assistantController.handleChat({ messages });
-      response.json({
-        ok: true,
-        ...result,
-        answer: result.content,
-        blocks:
-          typeof result.content === "string" && result.content
-            ? [textBlock(result.content)]
-            : [],
-        provider: result.modelMode === "local" ? "ollama" : "cloud",
-        route: `legacy_${result.modelMode}`
+      const payload = rewriteAssistantPayload({
+        prompt: lastUserPrompt,
+        payload: {
+          ok: true,
+          ...result,
+          answer: result.content,
+          blocks:
+            Array.isArray(result.blocks) && result.blocks.length > 0
+              ? result.blocks
+              : typeof result.content === "string" && result.content
+                ? [textBlock(result.content)]
+                : [],
+          provider: result.modelMode === "local" ? "ollama" : "cloud",
+          route: `legacy_${result.modelMode}`
+        }
       });
+      appendAssistantConversationLog(
+        buildAssistantChatLogEntry({
+          messages: normalizedMessages,
+          responsePayload: payload,
+        })
+      );
+      response.json(payload);
     } catch (error) {
       if (error?.statusCode) {
         response.status(error.statusCode).json({ ok: false, error: error.message });
@@ -2672,6 +2735,59 @@ async function buildDashboardPayload({
 
 function normalizeAskPrompt(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function firstQueryValue(value) {
+  if (Array.isArray(value)) {
+    return typeof value[0] === "string" ? value[0].trim() : "";
+  }
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeAssistantChatLogMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages
+    .filter(
+      (message) =>
+        message &&
+        (message.role === "user" || message.role === "assistant") &&
+        typeof message.content === "string"
+    )
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
+    .slice(-20);
+}
+
+function buildAssistantChatLogEntry({ messages, responsePayload }) {
+  return {
+    kind: "assistant-chat-exchange",
+    messages,
+    response: {
+      content: responsePayload?.content ?? "",
+      answer: responsePayload?.answer ?? "",
+      blocks: Array.isArray(responsePayload?.blocks)
+        ? responsePayload.blocks
+        : [],
+      sources: Array.isArray(responsePayload?.sources)
+        ? responsePayload.sources
+        : [],
+      proposedActions: Array.isArray(responsePayload?.proposedActions)
+        ? responsePayload.proposedActions
+        : [],
+      toolTrace: Array.isArray(responsePayload?.toolTrace)
+        ? responsePayload.toolTrace
+        : [],
+      provider: responsePayload?.provider ?? "",
+      route: responsePayload?.route ?? "",
+      model: responsePayload?.model ?? "",
+      modelMode: responsePayload?.modelMode ?? "",
+    },
+  };
 }
 
 function normalizeTeamGptEndpointUrl(value) {

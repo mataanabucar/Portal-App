@@ -19,6 +19,7 @@ import { createTeamGptAuthService } from "./services/teamgpt/auth.js";
 import { createModelProvider } from "./services/ai/modelProvider.js";
 import { createInMemoryPendingActionStore } from "./services/assistant/pendingActions.js";
 import { createAssistantController } from "./services/assistant/controller.js";
+import { createAssistantBambooImageHooks } from "./services/assistant/bambooImageHooks.js";
 import { createOrchestrator } from "./services/orchestrator/index.js";
 import { createDisabledKbStub } from "./services/disabledStubs.js";
 
@@ -43,6 +44,7 @@ export function startServer(overrides = {}) {
   const assistantModelProvider =
     config.assistantModelMode === "orchestrator" ? null : createModelProvider(config);
   const assistantPendingActionStore = createInMemoryPendingActionStore();
+  const assistantBambooImageHooks = createAssistantBambooImageHooks(config);
   // Controller stays constructed in every mode: the action confirm/cancel
   // routes need it, and they only use graphAuth + pendingActionStore.
   const assistantController = createAssistantController(config, {
@@ -77,6 +79,7 @@ export function startServer(overrides = {}) {
     teamGptAuthService,
     assistantModelProvider,
     assistantPendingActionStore,
+    assistantBambooImageHooks,
     assistantController,
     orchestrator,
   });

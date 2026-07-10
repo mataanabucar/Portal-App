@@ -28,8 +28,16 @@ import {
   type RealtimeTranscriptEvent,
 } from "@/lib/realtimeAssistant";
 import type {
+  AssistantResponseLength,
+  AssistantSource,
+  ConversationArtifact,
+  ResponseBlock,
+} from "@/lib/assistantChat";
+import { withResponseLengthHint } from "@/lib/assistantChat";
+import type {
   DashboardCardItem,
   DashboardResponse,
+  ResearchResponse,
 } from "@/lib/types";
 
 export interface RealtimeMessage {
@@ -37,6 +45,7 @@ export interface RealtimeMessage {
   role: "assistant" | "user";
   text: string;
   done: boolean;
+  createdAt: string;
 }
 
 export interface RealtimePresetOption {
@@ -80,6 +89,7 @@ interface UseRealtimeAssistantOptions {
   summary?: string;
   tone?: string;
   refreshing?: boolean;
+  responseLength: AssistantResponseLength;
   refresh: () => Promise<DashboardResponse | undefined>;
 }
 
@@ -140,6 +150,7 @@ export function useRealtimeAssistant({
   summary,
   tone,
   refreshing = false,
+  responseLength,
   refresh,
 }: UseRealtimeAssistantOptions) {
   const clientRef = useRef<RealtimeAssistantClient | null>(null);
@@ -147,6 +158,7 @@ export function useRealtimeAssistant({
   const summaryRef = useRef(summary);
   const toneRef = useRef(tone);
   const refreshingRef = useRef(refreshing);
+  const responseLengthRef = useRef(responseLength);
   const refreshRef = useRef(refresh);
   const wasRefreshingRef = useRef(refreshing);
   const lastContextSnapshotRef = useRef("");
@@ -155,6 +167,9 @@ export function useRealtimeAssistant({
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [messages, setMessages] = useState<RealtimeMessage[]>([]);
+  const [conversationArtifacts, setConversationArtifacts] = useState<
+    ConversationArtifact[]
+  >([]);
   const [activeToolName, setActiveToolName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [presets, setPresets] = useState<RealtimePresetOption[]>([]);
@@ -184,8 +199,9 @@ export function useRealtimeAssistant({
     summaryRef.current = summary;
     toneRef.current = tone;
     refreshingRef.current = refreshing;
+    responseLengthRef.current = responseLength;
     refreshRef.current = refresh;
-  }, [items, summary, tone, refreshing, refresh]);
+  }, [items, summary, tone, refreshing, responseLength, refresh]);
 
   useEffect(() => {
     presetIdRef.current = presetId;
@@ -221,16 +237,36 @@ export function useRealtimeAssistant({
           });
         }
         presetFxRef.current = fxMap;
-        setPresets(
-          valid.map((preset) => ({
-            id: preset.id as string,
-            label:
-              typeof preset.label === "string" && preset.label.trim()
-                ? preset.label
-                : (preset.id as string),
-            voice: typeof preset.voice === "string" ? preset.voice : undefined,
-          }))
-        );
+        const nextPresets = valid.map((preset) => ({
+          id: preset.id as string,
+          label:
+            typeof preset.label === "string" && preset.label.trim()
+              ? preset.label
+              : (preset.id as string),
+          voice: typeof preset.voice === "string" ? preset.voice : undefined,
+        }));
+        setPresets(nextPresets);
+
+        const storedPresetId = readLocal<string>(REALTIME_PRESET_KEY);
+        const hasStoredPresetPreference = typeof storedPresetId === "string";
+        const presetIds = new Set(nextPresets.map((preset) => preset.id));
+        const currentPresetId = presetIdRef.current.trim();
+
+        if (
+          !hasStoredPresetPreference &&
+          !currentPresetId &&
+          nextPresets.length > 0
+        ) {
+          setPresetId(nextPresets[0].id);
+          writeLocal(REALTIME_PRESET_KEY, nextPresets[0].id);
+          return;
+        }
+
+        if (currentPresetId && !presetIds.has(currentPresetId)) {
+          const fallbackPresetId = nextPresets[0]?.id ?? "";
+          setPresetId(fallbackPresetId);
+          writeLocal(REALTIME_PRESET_KEY, fallbackPresetId);
+        }
       } catch {
         // Preset list is best-effort; the assistant still works without it.
       }
@@ -476,6 +512,7 @@ export function useRealtimeAssistant({
           role: "user",
           text: normalized,
           done: true,
+          createdAt: new Date().toISOString(),
         },
       ])
     );
@@ -517,7 +554,25 @@ export function useRealtimeAssistant({
 
   function clearConversation() {
     setMessages([]);
+    setConversationArtifacts([]);
     setError(null);
+  }
+
+  // Interrupt the bot mid-speech. Cancels the in-flight response server-side
+  // and returns the session to listening.
+  function stopResponse() {
+    clientRef.current?.cancelResponse();
+    setStatus((current) => (current === "speaking" ? "listening" : current));
+  }
+
+  function appendConversationArtifact(artifact: ConversationArtifact | null) {
+    if (!artifact) {
+      return;
+    }
+
+    setConversationArtifacts((current) =>
+      capConversationArtifacts([...current, artifact])
+    );
   }
 
   async function runGetQueueSnapshot() {
@@ -586,6 +641,15 @@ export function useRealtimeAssistant({
       itemContext,
       messages: [],
     });
+
+    appendConversationArtifact(
+      buildResearchConversationArtifact({
+        question: normalizedQuestion,
+        reference: normalizedReference,
+        item,
+        result,
+      })
+    );
 
     return {
       ok: true,
@@ -657,7 +721,9 @@ export function useRealtimeAssistant({
     const response = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt: withResponseLengthHint(prompt, responseLengthRef.current),
+      }),
     });
 
     if (!response.ok) {
@@ -667,18 +733,20 @@ export function useRealtimeAssistant({
       throw new Error(payload.error || response.statusText);
     }
 
-    const payload = (await response.json()) as {
-      enabled?: boolean;
-      provider?: string;
-      model?: string;
-      answer?: string;
-    };
+    const payload = (await response.json()) as AskPayload;
+    appendConversationArtifact(
+      buildAskConversationArtifact({
+        question: normalizedQuestion,
+        payload,
+      })
+    );
 
     return {
       ok: payload.enabled !== false,
       provider: payload.provider,
       model: payload.model,
-      answer: normalizeText(payload.answer),
+      route: payload.route,
+      answer: buildSpeakableAnswer(payload.answer),
     };
   }
 
@@ -700,7 +768,9 @@ export function useRealtimeAssistant({
     const response = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt: withResponseLengthHint(prompt, responseLengthRef.current),
+      }),
     });
 
     if (!response.ok) {
@@ -710,13 +780,13 @@ export function useRealtimeAssistant({
       throw new Error(payload.error || response.statusText);
     }
 
-    const payload = (await response.json()) as {
-      enabled?: boolean;
-      provider?: string;
-      route?: string;
-      answer?: string;
-      sources?: unknown[];
-    };
+    const payload = (await response.json()) as AskPayload;
+    appendConversationArtifact(
+      buildAskConversationArtifact({
+        question: normalizedQuestion,
+        payload,
+      })
+    );
 
     return {
       ok: payload.enabled !== false,
@@ -1116,6 +1186,7 @@ export function useRealtimeAssistant({
     isConnected,
     isMuted,
     messages,
+    conversationArtifacts,
     activeToolName,
     error,
     presets,
@@ -1138,6 +1209,7 @@ export function useRealtimeAssistant({
     sendText,
     sendDashboardContext,
     clearConversation,
+    stopResponse,
   };
 }
 
@@ -1158,6 +1230,7 @@ function upsertRealtimeMessage(
     role: event.role,
     text,
     done: event.done,
+    createdAt: next[index]?.createdAt ?? new Date().toISOString(),
   };
 
   if (index === -1) {
@@ -1170,6 +1243,10 @@ function upsertRealtimeMessage(
 
 function capRealtimeMessages(messages: RealtimeMessage[]) {
   return messages.slice(-24);
+}
+
+function capConversationArtifacts(artifacts: ConversationArtifact[]) {
+  return artifacts.slice(-24);
 }
 
 function formatToolLabel(toolName: string) {
@@ -1209,6 +1286,16 @@ function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+interface AskPayload {
+  enabled?: boolean;
+  provider?: string;
+  route?: string;
+  model?: string;
+  answer?: string;
+  blocks?: unknown[];
+  sources?: unknown[];
+}
+
 // Compresses an orchestrator answer into something comfortable to speak:
 // strips code fences and markdown scaffolding, collapses table-ish lines,
 // and caps the length. The full blocks stay in the UI response.
@@ -1222,6 +1309,159 @@ function buildSpeakableAnswer(value: unknown): string {
     .replace(/\s+/g, " ")
     .trim();
   return cleaned.length > 800 ? `${cleaned.slice(0, 800)}…` : cleaned;
+}
+
+function buildAskConversationArtifact({
+  question,
+  payload,
+}: {
+  question: string;
+  payload: AskPayload;
+}): ConversationArtifact | null {
+  const answer = normalizeText(payload.answer);
+  const blocks = normalizeResponseBlocks(payload.blocks, answer);
+  if (!answer && blocks.length === 0) {
+    return null;
+  }
+
+  return {
+    id: `artifact_${crypto.randomUUID()}`,
+    question,
+    answer,
+    createdAt: new Date().toISOString(),
+    blocks,
+    sources: normalizeAssistantSources(payload.sources),
+    route: normalizeText(payload.route),
+    provider: normalizeText(payload.provider),
+  };
+}
+
+function buildResearchConversationArtifact({
+  question,
+  reference,
+  item,
+  result,
+}: {
+  question: string;
+  reference: string;
+  item: DashboardCardItem | null;
+  result: ResearchResponse;
+}): ConversationArtifact {
+  const subject = item?.title || reference;
+  const quickTakeLines = [
+    result.report.quickTake.issue &&
+      `Issue: ${result.report.quickTake.issue}`,
+    result.report.quickTake.whatWeKnow &&
+      `What we know: ${result.report.quickTake.whatWeKnow}`,
+    result.report.quickTake.nextStep &&
+      `Next step: ${result.report.quickTake.nextStep}`,
+  ].filter(Boolean) as string[];
+  const blocks: ResponseBlock[] = [];
+
+  if (quickTakeLines.length > 0) {
+    blocks.push({
+      type: "summary",
+      title: "Research quick take",
+      text: quickTakeLines.join("\n"),
+    });
+  }
+
+  if (result.report.summaryOfIssue) {
+    blocks.push({
+      type: "text",
+      text: result.report.summaryOfIssue,
+    });
+  }
+
+  if (result.report.whatWeFound.length > 0) {
+    blocks.push({
+      type: "summary",
+      title: "What we found",
+      text: result.report.whatWeFound.map((entry) => `- ${entry}`).join("\n"),
+    });
+  }
+
+  if (result.report.whatIsMissing.length > 0) {
+    blocks.push({
+      type: "summary",
+      title: "What is missing",
+      text: result.report.whatIsMissing.map((entry) => `- ${entry}`).join("\n"),
+    });
+  }
+
+  if (result.report.actionItems.length > 0) {
+    blocks.push({
+      type: "actions",
+      items: result.report.actionItems.map((entry) => ({
+        title: entry.task,
+        owner: entry.owner,
+        status: entry.status,
+      })),
+    });
+  }
+
+  const sources = buildResearchSources(result);
+  if (sources.length > 0) {
+    blocks.push({
+      type: "sources",
+      sources,
+    });
+  }
+
+  return {
+    id: `artifact_${crypto.randomUUID()}`,
+    question,
+    answer:
+      result.report.quickTake.whatWeKnow ||
+      result.report.summaryOfIssue ||
+      `Research summary for ${subject}.`,
+    createdAt: new Date().toISOString(),
+    blocks,
+    sources,
+    route: "research_item",
+    provider: "research",
+  };
+}
+
+function buildResearchSources(result: ResearchResponse): AssistantSource[] {
+  return [
+    ...result.codeFindings.slice(0, 3).map((finding) => ({
+      type: "code" as const,
+      title: finding.label,
+      path: finding.location,
+      snippet: finding.snippets,
+    })),
+    ...result.kbFindings.slice(0, 2).map((finding) => ({
+      type: "kb" as const,
+      title: finding.label,
+      path: finding.location,
+      snippet: finding.snippets,
+    })),
+    ...result.docsFindings.slice(0, 2).map((finding) => ({
+      type: "app_doc" as const,
+      title: finding.label,
+      path: finding.location,
+      snippet: finding.snippets,
+    })),
+  ];
+}
+
+function normalizeResponseBlocks(
+  value: unknown,
+  fallbackAnswer: string
+): ResponseBlock[] {
+  if (Array.isArray(value) && value.length > 0) {
+    return value.filter(Boolean) as ResponseBlock[];
+  }
+
+  const text = normalizeText(fallbackAnswer);
+  return text ? [{ type: "text", text }] : [];
+}
+
+function normalizeAssistantSources(value: unknown): AssistantSource[] {
+  return Array.isArray(value)
+    ? (value.filter(Boolean) as AssistantSource[])
+    : [];
 }
 
 function normalizeEmailRecipients(value: unknown): string[] {

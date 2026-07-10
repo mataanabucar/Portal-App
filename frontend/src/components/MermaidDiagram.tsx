@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 // Renders a mermaid definition (flowchart, sequence, gantt, pie, ...) to an
 // inline SVG. The library is imported lazily so the ~1MB bundle only loads
@@ -12,13 +12,27 @@ import { useEffect, useRef, useState } from "react";
 let mermaidInitialized = false;
 let renderCounter = 0;
 
-export function MermaidDiagram({ code }: { code: string }) {
+const EMPLOYEE_PHOTO_ENDPOINT = "/api/assistant/bamboo-image";
+const BAMBOO_EMPLOYEE_IMAGE_RE = /^https?:\/\/images\d+\.bamboohr\.com\//i;
+const BAMBOO_PLACEHOLDER_IMAGE_RE =
+  /^https:\/\/resources\.bamboohr\.com\/images\/photo_person_160x160\.png$/i;
+const IMAGE_SOURCE_RE =
+  /(<img\b[^>]*\bsrc\s*=\s*)(["'])([^"']+)\2/gi;
+
+// Memoized on `code`: a live voice session updates mic-meter state ~60fps,
+// re-rendering the dock; without this the rendered SVG subtree would churn on
+// every frame. The diagram only needs to re-render when the definition changes.
+export const MermaidDiagram = memo(function MermaidDiagram({
+  code,
+}: {
+  code: string;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const definition = (code || "").trim();
+    const definition = normalizeMermaidImageSources(code || "").trim();
     if (!definition) return;
 
     (async () => {
@@ -27,7 +41,7 @@ export function MermaidDiagram({ code }: { code: string }) {
         if (!mermaidInitialized) {
           mermaid.initialize({
             startOnLoad: false,
-            securityLevel: "strict",
+            securityLevel: "loose",
             theme: "dark",
             darkMode: true,
             fontFamily: "inherit",
@@ -73,4 +87,35 @@ export function MermaidDiagram({ code }: { code: string }) {
       className="my-2 overflow-x-auto rounded-lg border border-slate-800/60 bg-slate-950/70 p-3 [&_svg]:mx-auto [&_svg]:max-w-full"
     />
   );
+});
+
+function normalizeMermaidImageSources(definition: string): string {
+  return definition.replace(
+    IMAGE_SOURCE_RE,
+    (fullMatch, prefix: string, quote: string, source: string) => {
+      const normalizedSource = normalizeEmployeePhotoSource(source);
+      return `${prefix}${quote}${normalizedSource}${quote}`;
+    }
+  );
+}
+
+function normalizeEmployeePhotoSource(source: string): string {
+  const normalizedSource = source.trim().replace(/&amp;/gi, "&");
+
+  if (normalizedSource.startsWith(`${EMPLOYEE_PHOTO_ENDPOINT}?`)) {
+    return normalizedSource;
+  }
+
+  if (
+    BAMBOO_EMPLOYEE_IMAGE_RE.test(normalizedSource) ||
+    BAMBOO_PLACEHOLDER_IMAGE_RE.test(normalizedSource)
+  ) {
+    return buildEmployeePhotoUrl(normalizedSource);
+  }
+
+  return `${EMPLOYEE_PHOTO_ENDPOINT}?placeholder=1`;
+}
+
+function buildEmployeePhotoUrl(source: string): string {
+  return `${EMPLOYEE_PHOTO_ENDPOINT}?url=${encodeURIComponent(source)}`;
 }

@@ -53,6 +53,8 @@ export interface RealtimeAssistantClient {
   sendTextMessage(text: string): void;
   sendContextUpdate(contextObj: unknown): void;
   sendSystemNote(note: string): void;
+  /** Interrupt the in-progress model response (stops speech generation). */
+  cancelResponse(): void;
   /** Apply mic-cleanup setting changes to the live session (gate/timings). */
   updateMicSettings(settings: Partial<MicCleanupSettings>): void;
 }
@@ -355,6 +357,13 @@ export function createRealtimeAssistant(
     });
   }
 
+  // Stop the model mid-response: cancels generation server-side. Audio the
+  // browser already buffered may play out its final moment, which is
+  // acceptable for an interrupt.
+  function cancelResponse() {
+    sendEvent({ type: "response.cancel" });
+  }
+
   // Inject a short system note (e.g. the outcome of a user-confirmed action)
   // into the conversation without forcing a new spoken response.
   function sendSystemNote(note: string) {
@@ -611,6 +620,7 @@ export function createRealtimeAssistant(
     sendTextMessage,
     sendContextUpdate,
     sendSystemNote,
+    cancelResponse,
     updateMicSettings,
   };
 }
