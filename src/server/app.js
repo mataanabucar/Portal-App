@@ -1412,7 +1412,10 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
             threadId: request.body?.threadId
           });
 
-          response.json(payload);
+          // The realtime voice dock asks through this route, so it needs the
+          // same Bamboo image rewrite (proxy URLs + renderable image markup)
+          // as /api/assistant/chat.
+          response.json(rewriteAssistantPayload({ prompt, payload }));
         }
       );
     } catch (error) {

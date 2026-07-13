@@ -1304,6 +1304,8 @@ function buildSpeakableAnswer(value: unknown): string {
   if (!text) return "No answer was found.";
   const cleaned = text
     .replace(/```[\s\S]*?```/g, " (code omitted) ")
+    .replace(/!\[[^\]]*\]\((?:<[^>\n]*>|[^)\n]*)\)/g, " (photo shown in the dashboard) ")
+    .replace(/<img\b[^>]*>/gi, " (photo shown in the dashboard) ")
     .replace(/^\s*\|.*\|\s*$/gm, "")
     .replace(/[#*_`>]+/g, "")
     .replace(/\s+/g, " ")

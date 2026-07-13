@@ -299,6 +299,24 @@ function MarkdownText({ content }: { content: string }) {
             {children}
           </a>
         ),
+        img: ({ src, alt }) => {
+          const url = resolveMarkdownImageUrl(
+            typeof src === "string" ? src : ""
+          );
+          if (!url) {
+            return null;
+          }
+          return (
+            // eslint-disable-next-line @next/next/no-img-element -- remote
+            // hosts are not preconfigured for next/image in this app.
+            <img
+              src={url}
+              alt={alt || "Image"}
+              loading="lazy"
+              className="my-1 inline-block max-h-44 max-w-full rounded-xl border border-slate-700/80 align-middle"
+            />
+          );
+        },
         code: ({ className, children }) => {
           if (className === "language-mermaid") {
             return <MermaidDiagram code={String(children)} />;
@@ -334,7 +352,7 @@ function MarkdownText({ content }: { content: string }) {
         hr: () => <hr className="my-2 border-slate-800/80" />,
       }}
     >
-      {content}
+      {convertInlineImageTagsToMarkdown(content)}
     </ReactMarkdown>
   );
 }
@@ -405,6 +423,67 @@ function isSafeImageUrl(url: string): boolean {
     return true;
   }
   return url.startsWith("/") && !url.startsWith("//");
+}
+
+const BAMBOO_IMAGE_HOST_RE = /^https?:\/\/images\d+\.bamboohr\.com\//i;
+const BAMBOO_IMAGE_PROXY_ENDPOINT = "/api/assistant/bamboo-image";
+const INLINE_IMAGE_TAG_RE = /<img\b[^>]*>(?:\s*<\/img\s*>)?/gi;
+const SKIP_CODE_SEGMENT_RE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
+
+// Signed BambooHR photo URLs need the server proxy (it supplies the referer
+// and cookie the CDN expects); anything else just has to be a safe target.
+function resolveMarkdownImageUrl(src: string): string {
+  if (!src) {
+    return "";
+  }
+  if (BAMBOO_IMAGE_HOST_RE.test(src)) {
+    return `${BAMBOO_IMAGE_PROXY_ENDPOINT}?url=${encodeURIComponent(src)}`;
+  }
+  return isSafeImageUrl(src) ? src : "";
+}
+
+// Fallback for payloads that skipped the server-side rewrite: bare inline
+// <img> markup cannot render through react-markdown, so convert each tag to
+// markdown image syntax in place. Code fences and inline code spans are left
+// untouched (```html renders via HtmlPreview; other code displays literally).
+function convertInlineImageTagsToMarkdown(content: string): string {
+  const text = content || "";
+  if (!/<img\b/i.test(text)) {
+    return text;
+  }
+
+  let result = "";
+  let lastIndex = 0;
+  for (const segment of text.matchAll(SKIP_CODE_SEGMENT_RE)) {
+    const index = segment.index ?? 0;
+    result += replaceInlineImageTags(text.slice(lastIndex, index));
+    result += segment[0];
+    lastIndex = index + segment[0].length;
+  }
+  result += replaceInlineImageTags(text.slice(lastIndex));
+  return result;
+}
+
+function replaceInlineImageTags(segment: string): string {
+  return segment.replace(INLINE_IMAGE_TAG_RE, (tag) => {
+    const src = readImageTagAttribute(tag, "src").replace(/&amp;/gi, "&");
+    const url = resolveMarkdownImageUrl(src);
+    if (!url) {
+      return "";
+    }
+    const alt = (readImageTagAttribute(tag, "alt") || "Image").replace(
+      /[[\]]/g,
+      " "
+    );
+    return `![${alt}](<${url}>)`;
+  });
+}
+
+function readImageTagAttribute(tag: string, name: string): string {
+  const match = tag.match(
+    new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i")
+  );
+  return (match?.[1] ?? match?.[2] ?? match?.[3] ?? "").trim();
 }
 
 async function writeClipboardText(text: string) {

@@ -1,5 +1,8 @@
 "use client";
 
+const BAMBOO_IMAGE_HOST_RE = /^https?:\/\/images\d+\.bamboohr\.com\//i;
+const BAMBOO_IMAGE_PROXY_ENDPOINT = "/api/assistant/bamboo-image";
+
 export function sanitizeHtmlContent(html: unknown): string {
   const parser = new DOMParser();
   const documentNode = parser.parseFromString(String(html ?? ""), "text/html");
@@ -38,6 +41,18 @@ export function sanitizeHtmlContent(html: unknown): string {
         /^(?:javascript|vbscript):/i.test(attributeValue)
       ) {
         element.removeAttribute(attribute.name);
+      }
+    }
+
+    // Signed BambooHR photo URLs need the server proxy (it supplies the
+    // referer and cookie the CDN expects), so route them through it.
+    if (element.tagName.toLowerCase() === "img") {
+      const src = (element.getAttribute("src") || "").trim();
+      if (BAMBOO_IMAGE_HOST_RE.test(src)) {
+        element.setAttribute(
+          "src",
+          `${BAMBOO_IMAGE_PROXY_ENDPOINT}?url=${encodeURIComponent(src)}`
+        );
       }
     }
   }

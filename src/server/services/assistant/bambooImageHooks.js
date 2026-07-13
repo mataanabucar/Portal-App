@@ -60,14 +60,21 @@ export function createAssistantBambooImageHooks(config = {}) {
     const rewrittenBlocks = originalBlocks.map((block) =>
       rewriteResponseBlock(block, discoveredImageUrls)
     );
-    const rewrittenAnswer = rewriteBambooUrlsInText(originalAnswer, discoveredImageUrls);
-    const rewrittenContent = rewriteBambooUrlsInText(originalContent, discoveredImageUrls);
+    const rewrittenAnswer = convertInlineImageTagsToMarkdown(
+      rewriteBambooUrlsInText(originalAnswer, discoveredImageUrls)
+    );
+    const rewrittenContent = convertInlineImageTagsToMarkdown(
+      rewriteBambooUrlsInText(originalContent, discoveredImageUrls)
+    );
     const alreadyVisualizesImages =
       rewrittenBlocks.some((block) => block?.type === "image") ||
-      rewrittenBlocks.some((block) => block?.type === "text" && containsInlineImageMarkup(block.text)) ||
-      rewrittenBlocks.some((block) => block?.type === "summary" && containsInlineImageMarkup(block.text)) ||
-      containsInlineImageMarkup(rewrittenAnswer) ||
-      containsInlineImageMarkup(rewrittenContent);
+      rewrittenBlocks.some(
+        (block) =>
+          (block?.type === "text" || block?.type === "summary") &&
+          containsVisualImageMarkup(block.text)
+      ) ||
+      containsVisualImageMarkup(rewrittenAnswer) ||
+      containsVisualImageMarkup(rewrittenContent);
 
     if (looksLikeImagePrompt(cleanPrompt) && !alreadyVisualizesImages && discoveredImageUrls.length > 0) {
       for (const imageUrl of discoveredImageUrls) {
@@ -204,14 +211,12 @@ function rewriteResponseBlock(block, discoveredImageUrls) {
 
   switch (block.type) {
     case "text":
-      return {
-        ...block,
-        text: rewriteBambooUrlsInText(block.text, discoveredImageUrls),
-      };
     case "summary":
       return {
         ...block,
-        text: rewriteBambooUrlsInText(block.text, discoveredImageUrls),
+        text: convertInlineImageTagsToMarkdown(
+          rewriteBambooUrlsInText(block.text, discoveredImageUrls)
+        ),
       };
     case "table":
       return {
@@ -479,8 +484,76 @@ function looksLikeImagePrompt(prompt) {
   return BAMBOO_IMAGE_PROMPT_RE.test(prompt);
 }
 
-function containsInlineImageMarkup(value) {
-  return typeof value === "string" && (/<img\b/i.test(value) || value.includes("```html"));
+const INLINE_IMAGE_TAG_RE = /<img\b[^>]*>(?:\s*<\/img\s*>)?/gi;
+const SKIP_CODE_SEGMENT_RE = /```[\s\S]*?(?:```|$)|`[^`\n]*`/g;
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\(/;
+
+// Bare inline <img> markup cannot render inside the frontend's markdown text,
+// so convert each tag to markdown image syntax in place. That keeps a photo
+// next to the name it belongs to instead of collecting photos at the end.
+function convertInlineImageTagsToMarkdown(value) {
+  const text = toText(value);
+  if (!text || !/<img\b/i.test(text)) {
+    return text;
+  }
+
+  // Leave code fences and inline code spans untouched: ```html fences render
+  // through the frontend HTML preview and other code is displayed literally.
+  let result = "";
+  let lastIndex = 0;
+  for (const segment of text.matchAll(SKIP_CODE_SEGMENT_RE)) {
+    const index = segment.index ?? 0;
+    result += replaceInlineImageTags(text.slice(lastIndex, index));
+    result += segment[0];
+    lastIndex = index + segment[0].length;
+  }
+  result += replaceInlineImageTags(text.slice(lastIndex));
+  return result;
+}
+
+function replaceInlineImageTags(segment) {
+  return segment.replace(INLINE_IMAGE_TAG_RE, (tag) => {
+    const imageUrl = resolveInlineImageUrl(readImageTagAttribute(tag, "src"));
+    if (!imageUrl) {
+      return "";
+    }
+    const alt = (readImageTagAttribute(tag, "alt") || "BambooHR image").replace(
+      /[[\]]/g,
+      " "
+    );
+    return `![${alt}](<${imageUrl}>)`;
+  });
+}
+
+function readImageTagAttribute(tag, name) {
+  const match = tag.match(
+    new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i")
+  );
+  return normalizeText(match?.[1] ?? match?.[2] ?? match?.[3]);
+}
+
+function resolveInlineImageUrl(value) {
+  const decoded = normalizeText(value).replace(/&amp;/gi, "&");
+  if (!decoded) {
+    return "";
+  }
+  if (isBambooImageUrl(decoded)) {
+    return buildProxyUrl(decoded);
+  }
+  if (/^https?:\/\//i.test(decoded)) {
+    return decoded;
+  }
+  if (decoded.startsWith("/") && !decoded.startsWith("//")) {
+    return decoded;
+  }
+  return "";
+}
+
+function containsVisualImageMarkup(value) {
+  return (
+    typeof value === "string" &&
+    (MARKDOWN_IMAGE_RE.test(value) || value.includes("```html"))
+  );
 }
 
 function uniqueValues(values) {
