@@ -9,6 +9,7 @@ import { AISummaryCard } from "@/components/ai-summary/AISummaryCard";
 import { QuickReadModal } from "@/components/quick-read/QuickReadModal";
 import { TtsConfigModal } from "@/components/tts/TtsConfigModal";
 import { ResearchTestModal } from "@/components/research/ResearchTestModal";
+import { DayOrganizerModal } from "@/components/briefing/DayOrganizerModal";
 import { RealtimeAssistantDock } from "@/components/assistant/RealtimeAssistantDock";
 import { PillProgress3D } from "@/components/ui/PillProgress3D";
 import { orderByPriority } from "@/lib/priority";
@@ -39,6 +40,7 @@ export function DashboardPage() {
   const [quickReadOpen, setQuickReadOpen] = useState(false);
   const [ttsConfigOpen, setTtsConfigOpen] = useState(false);
   const [researchTestOpen, setResearchTestOpen] = useState(false);
+  const [dayOrganizerOpen, setDayOrganizerOpen] = useState(false);
   const {
     data,
     items,
@@ -87,6 +89,8 @@ export function DashboardPage() {
         quickReadActive={quickReadOpen}
         onTtsConfig={() => setTtsConfigOpen(true)}
         onResearchTest={() => setResearchTestOpen(true)}
+        onDayOrganizer={() => setDayOrganizerOpen(true)}
+        dayOrganizerActive={dayOrganizerOpen}
       />
 
       <main className="flex-1 min-w-0 px-5 py-8 space-y-6">
@@ -191,6 +195,11 @@ export function DashboardPage() {
       <ResearchTestModal
         open={researchTestOpen}
         onClose={() => setResearchTestOpen(false)}
+      />
+
+      <DayOrganizerModal
+        open={dayOrganizerOpen}
+        onClose={() => setDayOrganizerOpen(false)}
       />
 
       <RealtimeAssistantDock

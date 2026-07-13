@@ -1140,7 +1140,7 @@ const lucideDirectory = fileURLToPath(
   new URL("../../node_modules/lucide/dist/esm/", import.meta.url)
 );
 
-export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantBambooImageHooks, assistantController, orchestrator }) {
+export function createApp({ config, portalService, summarizer, parser, asker, graphAuth, emailContextSummarizer, kbService, gennyStudioService, sourcebotService, docsKbService, codeKbService, teamGptAuthService, assistantModelProvider, assistantPendingActionStore, assistantBambooImageHooks, assistantController, orchestrator, executiveDayOrganizer }) {
   const app = express();
   const rewriteAssistantPayload = ({ prompt, payload }) =>
     assistantBambooImageHooks?.rewriteAssistantPayload
@@ -1787,6 +1787,54 @@ export function createApp({ config, portalService, summarizer, parser, asker, gr
       }
 
       response.json({ ok: true, count: results.length, results });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Executive Day Organizer: two-stage briefing over today's calendar, the
+  // last 24h of email/Teams chat, and unread mail. Stage 1 prefilters raw
+  // Graph data into strict JSON; Stage 2 writes the executive briefing
+  // markdown from that JSON only. Source IDs are validated server-side.
+  app.post("/api/briefing/day", async (request, response, next) => {
+    try {
+      if (!executiveDayOrganizer) {
+        response.status(503).json({ ok: false, error: "The day organizer is not configured." });
+        return;
+      }
+      if (!graphAuth) {
+        response.status(503).json({ ok: false, error: "Graph auth is not configured." });
+        return;
+      }
+
+      const userContext =
+        typeof request.body?.userContext === "string" ? request.body.userContext.trim() : "";
+
+      let token;
+      try {
+        token = await graphAuth.getAccessToken();
+      } catch (authError) {
+        response.status(authError.statusCode || 401).json({
+          ok: false,
+          error: authError.message,
+          hint: "Sign in via the Graph tester (npm run graph-tester) to refresh the portal Graph token.",
+        });
+        return;
+      }
+
+      let result;
+      try {
+        result = await executiveDayOrganizer.generateBriefing({ token, userContext });
+      } catch (briefingError) {
+        const status = Number(briefingError?.statusCode) || Number(briefingError?.status) || 0;
+        if (status >= 400 && status < 600) {
+          response.status(status).json({ ok: false, error: briefingError.message });
+          return;
+        }
+        throw briefingError;
+      }
+
+      response.json({ ok: true, ...result });
     } catch (error) {
       next(error);
     }

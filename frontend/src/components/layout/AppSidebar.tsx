@@ -1,6 +1,12 @@
 "use client";
 
-import { BookOpen, FlaskConical, Headphones, LayoutDashboard } from "lucide-react";
+import {
+  BookOpen,
+  CalendarClock,
+  FlaskConical,
+  Headphones,
+  LayoutDashboard,
+} from "lucide-react";
 import { usePathname } from "next/navigation";
 import { Sidebar, type SidebarAction } from "@/components/layout/Sidebar";
 
@@ -9,6 +15,8 @@ interface AppSidebarProps {
   quickReadActive?: boolean;
   onTtsConfig?: () => void;
   onResearchTest?: () => void;
+  onDayOrganizer?: () => void;
+  dayOrganizerActive?: boolean;
 }
 
 export function AppSidebar({
@@ -16,6 +24,8 @@ export function AppSidebar({
   quickReadActive = false,
   onTtsConfig,
   onResearchTest,
+  onDayOrganizer,
+  dayOrganizerActive = false,
 }: AppSidebarProps) {
   const pathname = usePathname();
   const actions: SidebarAction[] = [
@@ -27,6 +37,16 @@ export function AppSidebar({
       active: pathname === "/",
     },
   ];
+
+  if (onDayOrganizer) {
+    actions.push({
+      id: "day-organizer",
+      label: "Day Organizer",
+      icon: CalendarClock,
+      onSelect: onDayOrganizer,
+      active: dayOrganizerActive,
+    });
+  }
 
   if (onQuickRead) {
     actions.push({

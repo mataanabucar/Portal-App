@@ -21,6 +21,7 @@ import { createInMemoryPendingActionStore } from "./services/assistant/pendingAc
 import { createAssistantController } from "./services/assistant/controller.js";
 import { createAssistantBambooImageHooks } from "./services/assistant/bambooImageHooks.js";
 import { createOrchestrator } from "./services/orchestrator/index.js";
+import { createExecutiveDayOrganizer } from "./services/briefing/executiveDayOrganizer.js";
 import { createDisabledKbStub } from "./services/disabledStubs.js";
 
 export function startServer(overrides = {}) {
@@ -63,6 +64,9 @@ export function startServer(overrides = {}) {
     teamGptAuthService,
     pendingActionStore: assistantPendingActionStore,
   });
+  const executiveDayOrganizer = createExecutiveDayOrganizer(config, {
+    teamGptAuthService,
+  });
   const app = createApp({
     config,
     portalService,
@@ -82,6 +86,7 @@ export function startServer(overrides = {}) {
     assistantBambooImageHooks,
     assistantController,
     orchestrator,
+    executiveDayOrganizer,
   });
   let disposed = false;
 

@@ -7,7 +7,9 @@ import {
 export function buildConfig(overrides = {}) {
   // Master AI provider switch. Toggle parser/summary/ask at once via
   // AI_PROVIDER in .env (openai | teamgpt). Per-feature vars
-  // (PARSER_PROVIDER, SUMMARY_PROVIDER, ASK_PROVIDER) override it when set.
+  // (PARSER_PROVIDER, SUMMARY_PROVIDER, ASK_PROVIDER, BRIEFING_PROVIDER)
+  // override it when set. BRIEFING_PROVIDER's default (below) is "teamgpt"
+  // regardless of AI_PROVIDER, unlike the others which fall back to it.
   // ASK_PROVIDER additionally supports "orchestrator" (deterministic intent
   // router — the default) and "local" (legacy Ollama, requires
   // LEGACY_LOCAL_RAG_ENABLED=true).
@@ -100,6 +102,10 @@ export function buildConfig(overrides = {}) {
     summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, defaultAiProvider),
     askProvider: normalizeAskProvider(process.env.ASK_PROVIDER, askDefault),
     parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, defaultAiProvider),
+    // Unlike the other per-feature providers, the day organizer briefing
+    // defaults to TeamGPT regardless of AI_PROVIDER — set BRIEFING_PROVIDER
+    // explicitly to override.
+    briefingProvider: normalizeAiProvider(process.env.BRIEFING_PROVIDER, "teamgpt"),
     legacyLocalRagEnabled,
     // OpenAI usage policy flags for the orchestrator. Both default off:
     // OpenAI is never the default KB/reasoning engine. See docs/orchestrator.md.

@@ -55,7 +55,7 @@ export function formatFieldValue(value: unknown, field: CatalogField): string {
 export function getFieldInitialValue(
   entry: CatalogFunction,
   field: CatalogField,
-): string | boolean {
+): string | number | boolean {
   const explicitDefault =
     entry.defaults?.[field.name] !== undefined
       ? entry.defaults[field.name]
@@ -79,8 +79,8 @@ export function getFieldInitialValue(
 
 export function buildInitialFormValues(
   entry: CatalogFunction,
-): Record<string, string | boolean> {
-  const values: Record<string, string | boolean> = {};
+): Record<string, string | number | boolean> {
+  const values: Record<string, string | number | boolean> = {};
   for (const field of entry.fields) {
     values[field.name] = getFieldInitialValue(entry, field);
   }
@@ -92,7 +92,7 @@ export function buildInitialFormValues(
 // preserving the original collectFormArgs semantics.
 export function collectFormArgs(
   entry: CatalogFunction,
-  formValues: Record<string, string | boolean>,
+  formValues: Record<string, string | number | boolean>,
 ): Record<string, unknown> {
   const args: Record<string, unknown> = {};
 

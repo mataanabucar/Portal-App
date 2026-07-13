@@ -2,6 +2,8 @@ import type {
   DashboardCacheRecord,
   DashboardRequest,
   DashboardResponse,
+  DayBriefingRequest,
+  DayBriefingResponse,
   HealthResponse,
   ItemEmailRequest,
   ItemEmailResult,
@@ -41,4 +43,6 @@ export const api = {
     post<{ ok: true; email: ItemEmailResult | null }>("/api/item/email", req),
   research: (req: ResearchRequest) =>
     post<ResearchResponse>("/api/item/research", req),
+  dayBriefing: (req: DayBriefingRequest = {}) =>
+    post<DayBriefingResponse>("/api/briefing/day", req),
 };

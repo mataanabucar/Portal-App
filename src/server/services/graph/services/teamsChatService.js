@@ -149,6 +149,74 @@ export async function searchRecentChatMessages(
   return matches.slice(0, limit);
 }
 
+/**
+ * Chat.Read-only recent-message scan: newest messages across the user's most
+ * recently active chats with no keyword filter (used by the executive day
+ * organizer briefing). Same access pattern as searchRecentChatMessages, minus
+ * the needle; optionally drops messages older than `sinceIso`.
+ * Returns results already shaped for the client.
+ * @scope Chat.Read
+ */
+export async function listRecentChatMessages(
+  token,
+  { maxChats = 15, perChat = 25, sinceIso = null, limit = 40 } = {}
+) {
+  const sinceTime = sinceIso ? new Date(sinceIso).getTime() : null;
+  const chats = await listRecentChatsForSearch(token, maxChats);
+
+  const perChatMessages = await Promise.all(
+    chats.map(async (chat) => {
+      try {
+        const data = await graphRequest({
+          method: "GET",
+          path: `/chats/${chat.id}/messages`,
+          token,
+          query: { $top: perChat },
+        });
+        const messages = data?.value ?? [];
+        const out = [];
+        for (const message of messages) {
+          // Skip system/event messages (joins, renames, etc.).
+          if (message?.messageType && message.messageType !== "message") {
+            continue;
+          }
+          if (
+            sinceTime &&
+            message?.createdDateTime &&
+            new Date(message.createdDateTime).getTime() < sinceTime
+          ) {
+            continue;
+          }
+          const content = stripChatHtml(message?.body?.content);
+          if (!content) {
+            continue;
+          }
+          out.push({
+            id: message.id || null,
+            chatId: chat.id || null,
+            topic: chat.topic || null,
+            from:
+              message.from?.user?.displayName ||
+              message.from?.application?.displayName ||
+              "Unknown sender",
+            date: message.createdDateTime || null,
+            snippet: content.slice(0, 300),
+          });
+        }
+        return out;
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  const results = perChatMessages.flat();
+  results.sort(
+    (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+  );
+  return results.slice(0, limit);
+}
+
 // ---------------------------------------------------------------------------
 // Chats
 // ---------------------------------------------------------------------------

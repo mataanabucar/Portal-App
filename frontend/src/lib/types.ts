@@ -291,3 +291,78 @@ export interface ResearchResponse {
   chatUrl: string | null;
   retrievalTrail?: RetrievalStep[];
 }
+
+// ── Executive Day Organizer (/api/briefing/day) ────────────────────────────
+
+export interface BriefingSource {
+  id: string;
+  type: "calendar" | "email" | "teams";
+  title: string;
+  time: string;
+  from: string;
+  webLink: string;
+}
+
+// Stage 1 retained item. Field names come from the prefilter prompt's JSON
+// schema (snake_case); only the ones the UI renders are typed here.
+export interface BriefingRetainedItem {
+  source?: string;
+  id: string;
+  title?: string;
+  subject?: string;
+  chat_or_channel?: string;
+  summary?: string;
+  why_retained?: string;
+  required_user_action?: string;
+  start_time?: string;
+  received_time?: string;
+  message_time?: string;
+  sender?: string;
+  organizer?: string;
+  automated_sender_exception_reason?: string;
+  tags?: string[];
+  priority_score?: number;
+  web_link?: string;
+}
+
+export interface BriefingPrefilter {
+  prefilter_summary: Record<string, unknown>;
+  retained_calendar_events: BriefingRetainedItem[];
+  retained_emails: BriefingRetainedItem[];
+  retained_teams_messages: BriefingRetainedItem[];
+  possible_duplicates_or_related_threads: Record<string, unknown>[];
+  focus_application_highlights: Record<string, unknown>[];
+  candidate_focus_blocks: Record<string, unknown>[];
+  assumptions_or_gaps: Record<string, unknown>[];
+}
+
+export interface DayBriefingRequest {
+  userContext?: string;
+}
+
+export interface DayBriefingResponse {
+  ok: true;
+  briefingMarkdown: string;
+  prefilter: BriefingPrefilter;
+  sources: BriefingSource[];
+  meta: {
+    provider: string;
+    models: { stage1: string; stage2: string };
+    window: {
+      date: string;
+      timezone: string;
+      calendarStart: string;
+      calendarEnd: string;
+      emailAndChatsSince: string;
+    };
+    counts: {
+      calendarFetched: number;
+      emailsFetched: number;
+      teamsFetched: number;
+      retained: number;
+      droppedUnknownIds: number;
+    };
+    sourceFailures: { source: string; error: string }[];
+    timings: { fetchMs: number; stage1Ms: number; stage2Ms: number };
+  };
+}

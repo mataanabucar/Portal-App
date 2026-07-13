@@ -20,7 +20,7 @@ const emit = defineEmits<{
   (e: "run", payload: { args: Record<string, unknown>; confirmMutation: boolean }): void;
 }>();
 
-const formValues = ref<Record<string, string | boolean>>({});
+const formValues = ref<Record<string, string | number | boolean>>({});
 const confirmMutation = ref(false);
 
 // Rebuild the form whenever the selected function changes; defaults come from

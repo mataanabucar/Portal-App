@@ -7,15 +7,22 @@ import SelectFieldPicker from "./SelectFieldPicker.vue";
 const props = defineProps<{
   field: CatalogField;
   entry: CatalogFunction;
-  modelValue: string | boolean;
+  modelValue: string | number | boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "update:modelValue", value: string | boolean): void;
+  (e: "update:modelValue", value: string | number | boolean): void;
 }>();
 
+// Vue's native v-model on type="number" inputs auto-casts every keystroke to
+// a JS number (even without the .number modifier). The getter has to accept
+// that number back, or it falls through to "" and vModelText's beforeUpdate
+// force-overwrites the DOM value, wiping the digit the user just typed.
 const stringValue = computed<string>({
-  get: () => (typeof props.modelValue === "string" ? props.modelValue : ""),
+  get: () =>
+    typeof props.modelValue === "string" || typeof props.modelValue === "number"
+      ? String(props.modelValue)
+      : "",
   set: (value) => emit("update:modelValue", value),
 });
 
