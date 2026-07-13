@@ -14,6 +14,7 @@ import {
   listUnreadMessages,
 } from "../graph/services/mailService.js";
 import { listRecentChatMessages } from "../graph/services/teamsChatService.js";
+import { getMe } from "../graph/services/userService.js";
 import {
   STAGE1_PREFILTER_TEMPLATE,
   STAGE2_ORGANIZER_TEMPLATE,
@@ -124,7 +125,7 @@ export function createExecutiveDayOrganizer(config, { teamGptAuthService } = {})
 
       // ── Fetch raw Graph data (each source degrades independently) ─────────
       const fetchStarted = Date.now();
-      const [calendarResult, inboxResult, unreadResult, chatsResult] =
+      const [calendarResult, inboxResult, unreadResult, chatsResult, meResult] =
         await Promise.allSettled([
           getMyCalendarView(token, toLocalIso(startOfDay), toLocalIso(endOfDay), {
             top: CALENDAR_TOP,
@@ -136,6 +137,7 @@ export function createExecutiveDayOrganizer(config, { teamGptAuthService } = {})
           }),
           listUnreadMessages(token, { top: UNREAD_TOP, select: EMAIL_SELECT }),
           listRecentChatMessages(token, { sinceIso, limit: CHAT_LIMIT }),
+          getMe(token, { select: "displayName,jobTitle,department,mail" }),
         ]);
       const fetchMs = Date.now() - fetchStarted;
 
@@ -144,6 +146,17 @@ export function createExecutiveDayOrganizer(config, { teamGptAuthService } = {})
       const rawInbox = settledValue(inboxResult, "email", sourceFailures) || [];
       const rawUnread = settledValue(unreadResult, "unread email", sourceFailures) || [];
       const rawChats = settledValue(chatsResult, "teams", sourceFailures) || [];
+
+      // Signed-in user's own role/focus — used to tailor the briefing rather
+      // than hardcoding "Director". A profile failure degrades to a neutral
+      // fallback role; it never aborts the briefing.
+      const me = meResult.status === "fulfilled" ? meResult.value : null;
+      const userProfile = {
+        displayName: String(me?.displayName ?? "").trim(),
+        jobTitle: String(me?.jobTitle ?? "").trim(),
+        department: String(me?.department ?? "").trim(),
+      };
+      const userRole = userProfile.jobTitle || "senior team member";
 
       if (
         calendarResult.status === "rejected" &&
@@ -199,12 +212,13 @@ export function createExecutiveDayOrganizer(config, { teamGptAuthService } = {})
           normalizeChatMessage(message, `tm-${index + 1}`, sourceMap)
         );
 
-      const contextText = buildUserContext(userContext) || "None.";
+      const contextText = buildUserContext(userContext, userProfile) || "None.";
 
       // ── Stage 1: prefilter (never skipped) ────────────────────────────────
       const stage1Prompt = renderTemplate(STAGE1_PREFILTER_TEMPLATE, {
         TODAY_DATE: todayDate,
         USER_TIMEZONE: timezone,
+        USER_ROLE: userRole,
         RAW_CALENDAR_EVENTS: JSON.stringify(events),
         RAW_EMAIL_MESSAGES: JSON.stringify(emails),
         RAW_TEAMS_MESSAGES: JSON.stringify(chats),
@@ -240,6 +254,7 @@ export function createExecutiveDayOrganizer(config, { teamGptAuthService } = {})
       const stage2Prompt = renderTemplate(STAGE2_ORGANIZER_TEMPLATE, {
         TODAY_DATE: todayDate,
         USER_TIMEZONE: timezone,
+        USER_ROLE: userRole,
         PREFILTERED_M365_JSON: JSON.stringify(prefilter),
         USER_CONTEXT: contextText,
       });
@@ -270,6 +285,7 @@ export function createExecutiveDayOrganizer(config, { teamGptAuthService } = {})
         meta: {
           provider,
           models: { stage1: stage1Response.model, stage2: stage2Response.model },
+          user: { ...userProfile, roleUsed: userRole },
           window: {
             date: todayDate,
             timezone,

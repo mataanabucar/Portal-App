@@ -13,7 +13,7 @@ export const STAGE1_PREFILTER_TEMPLATE = `You are the first stage of a two-stage
 
 Your job is to inspect raw Microsoft Graph data and return a strict, evidence-based JSON prefilter for a second prompt. Do not write the final executive briefing.
 
-The user is a Director responsible for multiple teams, clients, products, escalations, and delivery commitments. Optimize for maximum signal and minimum noise.
+The user is a {{USER_ROLE}}. Optimize for maximum signal and minimum noise, calibrated to the responsibilities and focus areas typical of that role (see User Context for the user's role and department).
 
 ====================================================
 NON-NEGOTIABLE OPERATING RULES
@@ -35,7 +35,7 @@ NON-NEGOTIABLE OPERATING RULES
 7. When rules conflict, use this precedence:
    explicit critical exception > hard exclusion exception > executive relevance > important-person preference > focus-application preference.
 8. Ask one internal question for every candidate item:
-   "What specific decision, action, preparation, escalation, risk, or monitoring responsibility requires the Director's attention?"
+   "What specific decision, action, preparation, escalation, risk, or monitoring responsibility requires the {{USER_ROLE}}'s attention?"
    If the answer is unsupported or immaterial, discard the item.
 
 ====================================================
@@ -569,7 +569,7 @@ Output JSON Schema:
 
 export const STAGE2_ORGANIZER_TEMPLATE = `You are the second stage of a two-stage Microsoft 365 executive-triage workflow.
 
-Produce the final executive briefing for a Director using only the supplied Stage 1 JSON. You are not retrieving data and must not recover, infer, or invent source records that Stage 1 discarded.
+Produce the final executive briefing for a {{USER_ROLE}} using only the supplied Stage 1 JSON. Tailor tone, priorities, and what counts as important to that role and the focus area in User Context. You are not retrieving data and must not recover, infer, or invent source records that Stage 1 discarded.
 
 ====================================================
 DATE & TIME CONTEXT
@@ -732,11 +732,14 @@ export function renderTemplate(template, vars = {}) {
   );
 }
 
-// Organization context for the {{USER_CONTEXT}} slot: in this org "Audit
-// Tracking System" is an alias of the Action Tracking System (ATS) app, so the
-// alias list and disambiguation rules ride along with every request instead of
-// being hardcoded into the (user-authored) prompt text.
-export function buildUserContext(extraContext = "") {
+// Context for the {{USER_CONTEXT}} slot. Two parts:
+//   1. Who the briefing is for — the signed-in user's own role/department, so
+//      both stages calibrate relevance to that role instead of a generic
+//      "Director" (the {{USER_ROLE}} slot carries the short title separately).
+//   2. Org context — "Audit Tracking System" is an alias of the Action Tracking
+//      System (ATS) app, so the alias list and disambiguation rules ride along
+//      with every request instead of being hardcoded into the prompt text.
+export function buildUserContext(extraContext = "", profile = null) {
   const ats = APPLICATION_CATALOG.find((entry) => entry.id === "ats");
   const aliases = ats?.aliases?.length
     ? [...new Set(ats.aliases.map((alias) => String(alias).trim()).filter(Boolean))]
@@ -745,10 +748,28 @@ export function buildUserContext(extraContext = "") {
     /ATS|Action Tracking|Compliance Calendar/i.test(rule)
   );
 
-  const lines = [
+  const lines = [];
+
+  const displayName = String(profile?.displayName ?? "").trim();
+  const jobTitle = String(profile?.jobTitle ?? "").trim();
+  const department = String(profile?.department ?? "").trim();
+  if (jobTitle || department || displayName) {
+    const who = displayName ? `for ${displayName}` : "for the signed-in user";
+    const roleDesc = [jobTitle, department ? `in ${department}` : ""]
+      .filter(Boolean)
+      .join(" ");
+    lines.push(
+      "Who this briefing is for:",
+      `- This briefing is prepared ${who}${roleDesc ? `, whose role is ${roleDesc}` : ""}.`,
+      "- Calibrate what counts as important, the tone, and the priorities to this role and focus area rather than to a generic executive or director.",
+      ""
+    );
+  }
+
+  lines.push(
     "Organization context:",
-    '- "Audit Tracking System" refers to the Action Tracking System (ATS) application; treat both names as the same focus application.',
-  ];
+    '- "Audit Tracking System" refers to the Action Tracking System (ATS) application; treat both names as the same focus application.'
+  );
   if (aliases.length) {
     lines.push(`- Known ATS aliases: ${aliases.join("; ")}.`);
   }
