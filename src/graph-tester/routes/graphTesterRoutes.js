@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { Router } from "express";
 import {
   getClientCatalog,
@@ -8,10 +6,7 @@ import {
   isCatalogEntryEnabled,
   getCatalogEntryMissingScopes,
 } from "../catalog/graphTesterCatalog.js";
-import {
-  buildCapabilityReport,
-  parseDecodedTokenFile,
-} from "../../server/services/graph/graphCapabilities.js";
+import { buildCapabilityReport } from "../../server/services/graph/graphCapabilities.js";
 import { hasGraphTesterAuthConfig } from "../utils/graphSession.js";
 import { parseCatalogArgs } from "../utils/fieldParsers.js";
 import { buildGraphTesterError, buildResultSummary, countResultItems } from "../utils/resultFormatting.js";
@@ -78,8 +73,9 @@ export function createGraphTesterRouter({ config, authStore }) {
   // delegated scopes, and which catalog functions they enable.
   router.get("/api/graph-tester/capabilities", async (request, response) => {
     const { session, grantedScopes } = await getSessionScopes();
-    const manifest = await readContextManifest();
-    const decodedTokenClaims = await readContextDecodedTokenClaims();
+    const manifest = config.graphClientId
+      ? { appId: config.graphClientId, displayName: "Configured Microsoft Graph app" }
+      : null;
 
     const currentTokenClaims = session.authenticated
       ? {
@@ -99,7 +95,7 @@ export function createGraphTesterRouter({ config, authStore }) {
 
     const report = buildCapabilityReport({
       manifest,
-      decodedTokenClaims,
+      decodedTokenClaims: null,
       currentTokenClaims,
       catalog: getFlatCatalog(),
     });
@@ -239,46 +235,6 @@ export function createGraphTesterRouter({ config, authStore }) {
   });
 
   return router;
-}
-
-const CONTEXT_DIR = path.resolve(process.cwd(), "filesforcontext");
-
-// App-registration manifest from filesforcontext/ — the file that carries
-// appId + displayName. Diagnostics only; runtime identity is GRAPH_CLIENT_ID.
-async function readContextManifest() {
-  try {
-    const fileNames = await fs.readdir(CONTEXT_DIR);
-    for (const fileName of fileNames) {
-      if (!fileName.endsWith(".json") || fileName.includes("generated")) continue;
-      try {
-        const parsed = JSON.parse(
-          await fs.readFile(path.join(CONTEXT_DIR, fileName), "utf-8")
-        );
-        if (parsed && typeof parsed.appId === "string" && parsed.displayName) {
-          return parsed;
-        }
-      } catch {
-        // Not clean JSON (e.g. decodedToken.json) — skip.
-      }
-    }
-  } catch {
-    // filesforcontext/ is optional at runtime.
-  }
-  return null;
-}
-
-// decodedToken.json is a decoded JWT text file ({header}.{payload}.[Signature]),
-// not valid JSON — parse defensively. Diagnostics only.
-async function readContextDecodedTokenClaims() {
-  try {
-    const rawText = await fs.readFile(
-      path.join(CONTEXT_DIR, "decodedToken.json"),
-      "utf-8"
-    );
-    return parseDecodedTokenFile(rawText).claims;
-  } catch {
-    return null;
-  }
 }
 
 function assertAuthConfig(config) {

@@ -1,6 +1,28 @@
 import "../src/loadEnv.js";
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { buildGraphTesterConfig } from "../src/graph-tester/config.js";
+
+const clientIndex = "src/graph-tester/client/dist/index.html";
+if (!existsSync(clientIndex)) {
+  const ensureResult = spawnSync(process.execPath, ["scripts/ensure-graph-tester-client-deps.js"], {
+    cwd: process.cwd(),
+    stdio: "inherit",
+  });
+  if (ensureResult.status !== 0) {
+    process.exit(ensureResult.status ?? 1);
+  }
+
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const buildResult = spawnSync(
+    npmCommand,
+    ["--prefix", "src/graph-tester/client", "run", "build"],
+    { cwd: process.cwd(), stdio: "inherit" }
+  );
+  if (buildResult.status !== 0) {
+    process.exit(buildResult.status ?? 1);
+  }
+}
 
 const config = buildGraphTesterConfig();
 const browserUrl = `http://${config.browserHost}:${config.port}`;

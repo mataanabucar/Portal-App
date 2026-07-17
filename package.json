@@ -1,7 +1,7 @@
 {
-  "name": "portal-visualizer-local",
+  "name": "portal-app-gennybot",
   "version": "0.1.0",
-  "description": "Browser-based localhost portal dashboard for Benchmark portal work queue review.",
+  "description": "Browser-based localhost assistant integrating Microsoft Graph, GennyStudio, TeamGPT, and Sourcebot.",
   "author": "Benchmark Gensuite",
   "private": true,
   "type": "module",
@@ -11,23 +11,18 @@
     "server:dev": "node --watch src/server/index.js",
     "graph-tester": "node scripts/launch-graph-tester.js",
     "graph-tester:dev": "node scripts/launch-graph-tester.js --watch",
-    "graph-tester:client": "npm --prefix src/graph-tester/client run dev",
-    "graph-tester:client:build": "npm --prefix src/graph-tester/client run build",
-    "graph:capabilities": "node scripts/graph-capability-report.js",
+    "graph-tester:client": "node scripts/ensure-graph-tester-client-deps.js && npm --prefix src/graph-tester/client run dev",
+    "graph-tester:client:build": "node scripts/ensure-graph-tester-client-deps.js && npm --prefix src/graph-tester/client run build",
     "bundle:localhost": "node scripts/build-localhost-shareable-bundle.js",
     "open:portal-profile": "node scripts/open-portal-profile.js",
     "smoke": "node scripts/smoke-test.js",
     "test:orchestrator": "node scripts/test-orchestrator-routing.js",
-    "legacy:rag:health": "node scripts/rag-health-check.js",
-    "legacy:rag:index-check": "node scripts/rag-index-check.js",
-    "legacy:rag:golden-test": "node scripts/rag-golden-test.js",
-    "legacy:rag:ask": "node scripts/rag-ask.js"
+    "share:check": "node scripts/pre-share-check.js"
   },
   "dependencies": {
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "lucide": "^1.17.0",
     "mermaid": "^11.16.0",
     "openai": "^6.39.0",
     "playwright-core": "^1.54.2"

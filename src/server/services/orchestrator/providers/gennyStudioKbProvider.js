@@ -1,6 +1,7 @@
 // GennyStudio/KB provider — the orchestrator's default answer engine.
 // aris_search returns a finished, user-facing answer, so its text is used
-// VERBATIM: never re-summarized by OpenAI or TeamGPT. Falls back to raw KB
+// VERBATIM for direct KB answers. Explicit follow-up transformations may chain
+// the result through TeamGPT. Falls back to raw KB
 // excerpts (callKBX.cfm) when GennyStudio is disabled, empty, or erroring.
 
 import { collectKbResearch } from "../../kb/research.js";

@@ -487,7 +487,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("text", "Person name", {
         required: true,
-        placeholder: "Mataan",
+        placeholder: "Jordan Lee",
       }),
       textField("select", "$select", {
         placeholder: "id,displayName,mail,userPrincipalName",
@@ -509,7 +509,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdOrUpn", "User ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
         description:
           "Accepts an object ID, UPN/email, or a human-friendly name. Ambiguous names must be narrowed down.",
       }),
@@ -534,7 +534,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdOrUpn", "User ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -555,7 +555,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdOrUpn", "User ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -576,7 +576,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdOrUpn", "User ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -597,7 +597,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdOrUpn", "User ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -622,7 +622,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdOrUpn", "User ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
         description:
           "Accepts an object ID, UPN/email, or a human-friendly name.",
       }),
@@ -1871,7 +1871,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("text", "Chat name or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       numberField("top", "$top", {
         placeholder: "10",
@@ -1890,7 +1890,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
         description:
           "Accepts a raw chat ID or a friendly chat/participant lookup.",
       }),
@@ -1915,7 +1915,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -1936,7 +1936,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("membershipId", "Membership ID", {
         required: true,
@@ -1963,7 +1963,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("userIdA", "First user ID, email, or name", {
         required: true,
-        placeholder: "person@company.com or Mataan Abucar",
+        placeholder: "person@company.com or John Smith",
       }),
       textField("userIdB", "Second user ID, email, or name", {
         required: true,
@@ -2020,7 +2020,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       numberField("top", "$top", {
         placeholder: "20",
@@ -2047,7 +2047,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
     ],
     invoke: async (token, args) =>
@@ -2066,7 +2066,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("messageId", "Message ID", {
         required: true,
@@ -2091,7 +2091,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("messageId", "Message ID", {
         required: true,
@@ -2116,7 +2116,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("messageId", "Message ID", {
         required: true,
@@ -2145,7 +2145,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -2166,7 +2166,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textField("select", "$select"),
     ],
@@ -2191,7 +2191,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("chatId", "Chat ID, topic, or participant", {
         required: true,
-        placeholder: "Safety team or Mataan Abucar",
+        placeholder: "Safety team or John Smith",
       }),
       textareaField("content", "Message content", {
         required: true,
@@ -2519,7 +2519,7 @@ const GRAPH_TESTER_CATALOG = [
     fields: [
       textField("text", "Person name or email", {
         required: true,
-        placeholder: "Mataan",
+        placeholder: "Jordan Lee",
       }),
       numberField("top", "$top", {
         placeholder: "10",

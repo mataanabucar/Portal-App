@@ -3,14 +3,12 @@ import { getClientCatalog } from "../../../graph-tester/catalog/graphTesterCatal
 /**
  * The tool list sent to the model is intentionally small and fixed —
  * list_graph_functions + run_graph_function, mirroring the existing voice
- * assistant's REALTIME_TOOLS pattern (app.js) — rather than one tool per
+ * assistant's shared tool-catalog pattern — rather than one tool per
  * Graph catalog entry. A capability-gated token can have 100+ enabled
- * functions; sending that many tool schemas is unreliable for local models
- * (confirmed by testing: qwen2.5-coder:7b hallucinated a tool call when given
- * 100+ tools, but discovers/calls correctly through this 2-tool indirection).
- * Cloud models handle either shape fine, so one shape is used for both.
+ * functions. This two-tool indirection keeps the schema compact and ensures
+ * the model discovers only capability-gated functions before executing one.
  */
-export function buildAssistantTools({ grantedScopes = [], docsKbEnabled = false, codeKbEnabled = false } = {}) {
+export function buildAssistantTools({ grantedScopes = [] } = {}) {
   const tools = [
     {
       name: "list_graph_functions",
@@ -55,51 +53,13 @@ export function buildAssistantTools({ grantedScopes = [], docsKbEnabled = false,
     },
   ];
 
-  if (docsKbEnabled) {
-    tools.push({
-      name: "search_docs",
-      kind: "docs",
-      description:
-        "Search the app's documentation knowledge base (architecture, schemas, design notes) for relevant excerpts. Use this for questions about how the app's own systems are built.",
-      parameters: {
-        type: "object",
-        properties: { query: { type: "string", description: "What to look up in the documentation." } },
-        required: ["query"],
-        additionalProperties: false,
-      },
-      mutation: false,
-      safety: "read",
-      confirmationRequired: false,
-    });
-  }
-
-  if (codeKbEnabled) {
-    tools.push({
-      name: "search_code",
-      kind: "code",
-      description:
-        "Search the app's own source code (backend + frontend) for where a feature, route, or function is implemented. Use this for 'where is X implemented' / 'what file controls Y' questions.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "What to look up, e.g. a feature name, route path, or function name." },
-        },
-        required: ["query"],
-        additionalProperties: false,
-      },
-      mutation: false,
-      safety: "read",
-      confirmationRequired: false,
-    });
-  }
-
   return tools;
 }
 
 /**
  * Compact, capability-filtered Graph function catalog for the
  * list_graph_functions tool result — same underlying data
- * /api/assistant/graph/functions already returns to the voice assistant.
+ * /api/assistant/graph/functions returns to the text assistant.
  */
 export function buildGraphFunctionCatalog(grantedScopes = [], { service = "", search = "" } = {}) {
   const serviceFilter = typeof service === "string" ? service.trim() : "";

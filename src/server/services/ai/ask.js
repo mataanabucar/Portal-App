@@ -9,20 +9,12 @@ export function createAskService(config, { teamGptAuthService } = {}) {
     config.openAiEnabled && config.openAiApiKey
       ? new OpenAI({ apiKey: config.openAiApiKey })
       : null;
-  const localClient =
-    config.localLlmBaseUrl && config.localLlmModel
-      ? new OpenAI({
-          apiKey: config.localLlmApiKey || "ollama",
-          baseURL: config.localLlmBaseUrl
-        })
-      : null;
   const teamGptClient = createTeamGptClient(config, teamGptAuthService);
 
   return {
     describe() {
       const provider = resolveProvider(config.askProvider);
       const enabled = isProviderEnabled(provider, {
-        localClient,
         openAiClient,
         teamGptClient
       });
@@ -39,44 +31,6 @@ export function createAskService(config, { teamGptAuthService } = {}) {
       const normalizedPrompt = normalizePrompt(prompt);
       const provider = resolveProvider(options.provider || config.askProvider);
       const model = resolveModel(config, options.model, provider);
-
-      if (provider === "local") {
-        if (!localClient) {
-          return buildDisabledAskResult({
-            config,
-            prompt: normalizedPrompt,
-            model,
-            provider,
-            requestId
-          });
-        }
-
-        const response = await localClient.chat.completions.create({
-          model,
-          messages: [
-            { role: "system", content: buildInstructions() },
-            { role: "user", content: normalizedPrompt }
-          ],
-          temperature: 0.2
-        });
-        const answer = response.choices?.[0]?.message?.content?.trim() ?? "";
-
-        return {
-          enabled: true,
-          provider,
-          model,
-          reason: null,
-          prompt: normalizedPrompt,
-          answer,
-          debug: buildDebugObject({
-            requestId,
-            model,
-            provider,
-            openaiResponseId: response.id,
-            threadId: ""
-          })
-        };
-      }
 
       if (provider === "teamgpt") {
         if (!teamGptClient) {
@@ -191,10 +145,6 @@ function resolveModel(config, requestedModel, provider) {
     return requestedModel.trim();
   }
 
-  if (provider === "local") {
-    return config.localLlmModel;
-  }
-
   return provider === "teamgpt" ? config.teamGptModel : config.openAiModel;
 }
 
@@ -209,24 +159,14 @@ function assertCompleted(response) {
 }
 
 function resolveProvider(value) {
-  if (value === "local") {
-    return "local";
-  }
   return value === "openai" ? "openai" : "teamgpt";
 }
 
-function isProviderEnabled(provider, { localClient, openAiClient, teamGptClient }) {
-  if (provider === "local") {
-    return Boolean(localClient);
-  }
+function isProviderEnabled(provider, { openAiClient, teamGptClient }) {
   return provider === "teamgpt" ? Boolean(teamGptClient) : Boolean(openAiClient);
 }
 
 function buildDisabledReason(config, provider) {
-  if (provider === "local") {
-    return `Set LOCAL_LLM_BASE_URL and LOCAL_LLM_MODEL, start Ollama, and pull the model "${config.localLlmModel}".`;
-  }
-
   if (provider === "teamgpt") {
     return "TeamGPT is not available. Verify TeamGPT page access and local browser auth.";
   }
@@ -238,8 +178,7 @@ function buildDisabledReason(config, provider) {
 
 function buildDisabledAskResult({ config, prompt, model, provider, requestId }) {
   const reason = buildDisabledReason(config, provider);
-  const providerLabel =
-    provider === "local" ? "local LLM" : provider === "teamgpt" ? "TeamGPT" : "OpenAI";
+  const providerLabel = provider === "teamgpt" ? "TeamGPT" : "OpenAI";
 
   return {
     enabled: false,

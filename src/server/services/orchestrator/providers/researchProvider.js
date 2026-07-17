@@ -9,7 +9,6 @@ export function createResearchProvider({
   sourcebotService,
   kbService,
   gennyStudioService,
-  docsKbService,
   config,
   teamGptAuthService
 }) {
@@ -25,7 +24,6 @@ export function createResearchProvider({
           sourcebotService,
           kbService,
           gennyStudioService,
-          docsKbService,
           config,
           itemContext: options.itemContext || "",
           userQuery: prompt,
@@ -131,14 +129,6 @@ function buildSources(outcome) {
       type: "kb",
       title: finding.label || "KB finding",
       path: finding.webUrl || finding.location || "",
-      snippet: typeof finding.snippets === "string" ? finding.snippets.slice(0, 500) : ""
-    });
-  }
-  for (const finding of outcome?.docsFindings || []) {
-    sources.push({
-      type: "research",
-      title: finding.label || finding.location || "Docs finding",
-      path: finding.location || "",
       snippet: typeof finding.snippets === "string" ? finding.snippets.slice(0, 500) : ""
     });
   }

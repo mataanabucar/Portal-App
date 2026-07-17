@@ -12,7 +12,7 @@ import { runGraphFunction } from "../../assistant/graphFunctionRunner.js";
 import { textBlock, tableBlock } from "../responseBlocks.js";
 
 const MUTATION_GUIDANCE =
-  "Actions that change Microsoft 365 data (send, reply, delete, schedule, post) are not run by the deterministic assistant. Use the voice assistant or the legacy chat mode for those — every change still requires your explicit confirmation before anything happens.";
+  "Actions that change Microsoft 365 data (send, reply, delete, schedule, post) are not executed automatically. Use the TEXT assistant action flow when a supported mutation is available; every change requires explicit confirmation before execution.";
 
 const SIGN_IN_GUIDANCE =
   "Sign in with your Microsoft account first (npm run graph-tester) to ask about your mail, calendar, or Teams chats.";

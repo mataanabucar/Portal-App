@@ -1,0 +1,28 @@
+Portal Visualizer Text-Only Localhost Bundle
+
+What this is
+- A browser-based localhost assistant using the TEXT interface only.
+- OpenAI Realtime chat and OpenAI text-to-speech are not included.
+
+Requirements
+- Node.js 20 or newer must already be installed.
+
+How to use
+1. Unzip this folder somewhere local.
+2. Double-click Start Portal Visualizer Localhost.cmd once to create .env.
+3. Edit .env and add only the approved configuration for this machine.
+4. Run the launcher again to start the backend and frontend.
+5. Sign in to Microsoft / Portal when prompted.
+
+Text assistant tools
+- TeamGPT for transformations, summaries, prompts, and action extraction.
+- GennyStudio / Knowledge Base for documentation-grounded answers.
+- Sourcebot for code search and implementation evidence.
+- Microsoft Graph for approved mail, calendar, Teams, and profile searches/actions.
+
+Excluded
+- Realtime voice chat, microphone controls, Speech settings, Test Voice, Listen buttons, TTS routes, audio plugins, and local credentials.
+
+Security
+- Credentials and token caches are intentionally excluded.
+- Do not copy another user's .env, .local-auth, .local-browser, or .local-state folders into this bundle.

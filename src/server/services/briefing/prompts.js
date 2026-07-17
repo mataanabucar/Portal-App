@@ -195,7 +195,7 @@ Promote and retain an automated message only when the source explicitly establis
 - a compliance or regulatory deadline within 14 days requiring the user's action
 - an audit finding requiring the user's response
 - a delivery commitment demonstrably at risk
-- an action explicitly assigned to Mataan, due within 7 days, with a material consequence
+- an action explicitly assigned to the user, due within 7 days, with a material consequence
 - a Technical Assessment or Risk Assessment requiring a concrete decision, response, or approval within 14 days
 
 For each promoted automated message:

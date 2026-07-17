@@ -10,16 +10,12 @@ export function buildConfig(overrides = {}) {
   // (PARSER_PROVIDER, SUMMARY_PROVIDER, ASK_PROVIDER, BRIEFING_PROVIDER)
   // override it when set. BRIEFING_PROVIDER's default (below) is "teamgpt"
   // regardless of AI_PROVIDER, unlike the others which fall back to it.
-  // ASK_PROVIDER additionally supports "orchestrator" (deterministic intent
-  // router — the default) and "local" (legacy Ollama, requires
-  // LEGACY_LOCAL_RAG_ENABLED=true).
+  // ASK_PROVIDER additionally supports "orchestrator" (the deterministic
+  // intent router and default).
   const defaultAiProvider = normalizeAiProvider(process.env.AI_PROVIDER, "openai");
   // When AI_PROVIDER is not set explicitly, /api/ask defaults to the
   // deterministic orchestrator rather than a single direct provider.
   const askDefault = process.env.AI_PROVIDER ? defaultAiProvider : "orchestrator";
-  // Local Ollama chat + local embedding RAG are archived. They stay in the
-  // repo behind this flag; without it, "local" modes are coerced away below.
-  const legacyLocalRagEnabled = process.env.LEGACY_LOCAL_RAG_ENABLED === "true";
   const openAiModel = process.env.OPENAI_MODEL || "merlin";
   const baseConfig = {
     host: process.env.SERVER_HOST || "127.0.0.1",
@@ -83,22 +79,6 @@ export function buildConfig(overrides = {}) {
     openAiApiKey: process.env.OPENAI_API_KEY || "",
     openAiModel,
     openAiAllowTestchat: process.env.OPENAI_ALLOW_TESTCHAT !== "false",
-    openAiRealtimeEnabled: process.env.OPENAI_REALTIME_ENABLED === "true",
-    openAiRealtimeModel: process.env.OPENAI_REALTIME_MODEL || openAiModel,
-    openAiRealtimeVoice: process.env.OPENAI_REALTIME_VOICE || "marin",
-    openAiRealtimeReasoningEffort:
-      process.env.OPENAI_REALTIME_REASONING_EFFORT || "medium",
-    openAiRealtimeMaxOutputTokens: Number.parseInt(
-      process.env.OPENAI_REALTIME_MAX_OUTPUT_TOKENS || "900",
-      10
-    ),
-    // Pin transcription language (ISO-639-1) to stop the transcriber from
-    // hallucinating foreign-language phrases on silence/noise. "auto" = detect.
-    openAiRealtimeTranscribeLanguage:
-      process.env.OPENAI_REALTIME_TRANSCRIBE_LANGUAGE || "en",
-    // Input noise reduction: near_field (headset/close mic), far_field, or off.
-    openAiRealtimeNoiseReduction:
-      process.env.OPENAI_REALTIME_NOISE_REDUCTION || "near_field",
     summaryProvider: normalizeAiProvider(process.env.SUMMARY_PROVIDER, defaultAiProvider),
     askProvider: normalizeAskProvider(process.env.ASK_PROVIDER, askDefault),
     parserProvider: normalizeAiProvider(process.env.PARSER_PROVIDER, defaultAiProvider),
@@ -106,7 +86,6 @@ export function buildConfig(overrides = {}) {
     // defaults to TeamGPT regardless of AI_PROVIDER — set BRIEFING_PROVIDER
     // explicitly to override.
     briefingProvider: normalizeAiProvider(process.env.BRIEFING_PROVIDER, "teamgpt"),
-    legacyLocalRagEnabled,
     // OpenAI usage policy flags for the orchestrator. Both default off:
     // OpenAI is never the default KB/reasoning engine. See docs/orchestrator.md.
     orchestratorOpenAiFallbackEnabled:
@@ -158,7 +137,7 @@ export function buildConfig(overrides = {}) {
     // Marker string present in every KB document the user uploads. The
     // orchestrator's raw-KB fallback search includes it so results scope to
     // the user's own uploads rather than the whole org KB. Empty disables.
-    kbUploadMarker: process.env.KB_UPLOAD_MARKER ?? "mjabmllm",
+    kbUploadMarker: process.env.KB_UPLOAD_MARKER ?? "",
     kbRequestTimeoutMs: Number.parseInt(
       process.env.KB_REQUEST_TIMEOUT_MS || process.env.REQUEST_TIMEOUT_MS || "20000",
       10
@@ -202,73 +181,18 @@ export function buildConfig(overrides = {}) {
     graphTokenCacheFile: process.env.GRAPH_TOKEN_CACHE_FILE || ".local-auth/graph-tester-token.json",
     teamGptTokenCacheFile: process.env.TEAMGPT_TOKEN_CACHE_FILE || ".local-auth/teamgpt-token.json",
 
-    // Assistant chat engine. "orchestrator" (default) = deterministic intent
-    // router over GennyStudio/TeamGPT/Sourcebot/Graph/research — no reasoning
-    // model needed. "cloud"/"local" = the legacy tool-calling loop
-    // (modelProvider.js); "local" additionally requires
-    // LEGACY_LOCAL_RAG_ENABLED=true.
+    // Assistant chat engine. "orchestrator" (default) uses the deterministic
+    // router over GennyStudio, TeamGPT, Sourcebot, Graph, and research. "cloud"
+    // enables the optional OpenAI-compatible Graph tool-calling chat loop.
     assistantModelMode: normalizeAssistantModelMode(
       process.env.ASSISTANT_MODEL_MODE,
       "orchestrator"
     ),
     assistantMaxToolRounds: Number.parseInt(process.env.ASSISTANT_MAX_TOOL_ROUNDS || "4", 10),
-    localLlmBaseUrl: process.env.LOCAL_LLM_BASE_URL || "http://localhost:11434/v1",
-    // Empirically verified against this Ollama install (see CodeLogs): both
-    // qwen2.5-coder:7b (writes a tool-call-shaped JSON blob as plain content
-    // instead of populating tool_calls) and devstral-small-2:latest (24B —
-    // correct format, but too slow for a multi-round loop; >5 min with no
-    // response) were unreliable despite being tagged "tools"-capable by
-    // Ollama. llama3.2:3b reliably emits real tool_calls and responds fast.
-    localLlmModel: process.env.LOCAL_LLM_MODEL || "llama3.2:3b",
-    localLlmApiKey: process.env.LOCAL_LLM_API_KEY || "ollama",
     cloudLlmProvider: process.env.CLOUD_LLM_PROVIDER || "openai",
     cloudLlmApiKey: process.env.CLOUD_LLM_API_KEY || "",
-    cloudLlmModel: process.env.CLOUD_LLM_MODEL || "",
-
-    // Assistant embeddings (docs + code vector search). "disabled" (default)
-    // skips building docsKb/codeKb entirely — the orchestrator answers KB
-    // questions via GennyStudio instead. "local" requires
-    // LEGACY_LOCAL_RAG_ENABLED=true.
-    assistantEmbeddingMode: normalizeEmbeddingMode(
-      process.env.ASSISTANT_EMBEDDING_MODE,
-      "disabled"
-    ),
-    localEmbeddingBaseUrl: process.env.LOCAL_EMBEDDING_BASE_URL || "http://localhost:11434/v1",
-    localEmbeddingModel: process.env.LOCAL_EMBEDDING_MODEL || "nomic-embed-text",
-    localEmbeddingApiKey: process.env.LOCAL_EMBEDDING_API_KEY || "ollama",
-    cloudEmbeddingProvider: process.env.CLOUD_EMBEDDING_PROVIDER || "openai",
-    cloudEmbeddingApiKey: process.env.CLOUD_EMBEDDING_API_KEY || "",
-    cloudEmbeddingModel: process.env.CLOUD_EMBEDDING_MODEL || "text-embedding-3-small",
-
-    // Optional override for where docsKb reads project documents from.
-    // Empty string keeps the existing default (repo's docs/ folder).
-    // Accepts an absolute path or one relative to the repo root.
-    docsKbPath: process.env.DOCS_KB_PATH || ""
+    cloudLlmModel: process.env.CLOUD_LLM_MODEL || ""
   };
-
-  // Env-derived "local" modes are legacy-only. Coerce them away unless the
-  // legacy flag is set. Programmatic overrides (spread below) are exempt so
-  // tests can still force any mode.
-  if (!legacyLocalRagEnabled) {
-    if (baseConfig.assistantModelMode === "local") {
-      console.warn(
-        "[config] ASSISTANT_MODEL_MODE=local is archived; using \"orchestrator\". Set LEGACY_LOCAL_RAG_ENABLED=true to re-enable."
-      );
-      baseConfig.assistantModelMode = "orchestrator";
-    }
-    if (baseConfig.assistantEmbeddingMode === "local") {
-      console.warn(
-        "[config] ASSISTANT_EMBEDDING_MODE=local is archived; using \"disabled\". Set LEGACY_LOCAL_RAG_ENABLED=true to re-enable."
-      );
-      baseConfig.assistantEmbeddingMode = "disabled";
-    }
-    if (baseConfig.askProvider === "local") {
-      console.warn(
-        "[config] ASK_PROVIDER=local is archived; using \"orchestrator\". Set LEGACY_LOCAL_RAG_ENABLED=true to re-enable."
-      );
-      baseConfig.askProvider = "orchestrator";
-    }
-  }
 
   return { ...baseConfig, ...overrides };
 }
@@ -282,7 +206,7 @@ function normalizeAiProvider(value, fallback) {
 
 function normalizeAskProvider(value, fallback) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (normalized === "local" || normalized === "orchestrator") {
+  if (normalized === "orchestrator") {
     return normalized;
   }
   return normalizeAiProvider(normalized, fallback);
@@ -295,14 +219,5 @@ function normalizeOnOffOption(value, fallback) {
 
 function normalizeAssistantModelMode(value, fallback) {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return normalized === "local" || normalized === "cloud" || normalized === "orchestrator"
-    ? normalized
-    : fallback;
-}
-
-function normalizeEmbeddingMode(value, fallback) {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return normalized === "local" || normalized === "cloud" || normalized === "disabled"
-    ? normalized
-    : fallback;
+  return normalized === "cloud" || normalized === "orchestrator" ? normalized : fallback;
 }
